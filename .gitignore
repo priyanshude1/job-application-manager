@@ -1,0 +1,27 @@
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Database
+jam.db
+
+# User data (private career data — never committed)
+templates/*.tex
+data/resumes/*
+!data/resumes/.gitkeep
+outputs/generated/*
+!outputs/generated/.gitkeep
+
+# MLflow tracking
+mlruns/*
+!mlruns/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+*.log

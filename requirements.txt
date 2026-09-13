@@ -1,0 +1,16 @@
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Database
+sqlalchemy==2.0.36
+
+# Settings / env
+python-dotenv==1.0.1
+
+# Testing
+pytest==8.3.4
+httpx==0.28.1
+
+# Linting
+ruff==0.8.4
