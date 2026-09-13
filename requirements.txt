@@ -7,6 +7,7 @@ sqlalchemy==2.0.36
 
 # Document processing
 pymupdf==1.25.1
+python-multipart==0.0.20
 
 # Settings / env
 python-dotenv==1.0.1
