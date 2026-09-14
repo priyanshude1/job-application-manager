@@ -18,13 +18,13 @@ def _make_pdf(path: str, text: str) -> None:
 @pytest.fixture()
 def sample_pdf(tmp_path):
     path = tmp_path / "sample.pdf"
-    _make_pdf(str(path), "Priyanshu Kumar\nSoftware Engineer")
+    _make_pdf(str(path), "Priyanshu De\nSoftware Engineer")
     return str(path)
 
 
 def test_parse_resume_pdf_extracts_text(sample_pdf):
     text = parse_resume_pdf(sample_pdf)
-    assert "Priyanshu Kumar" in text
+    assert "Priyanshu De" in text
     assert "Software Engineer" in text
 
 
@@ -35,7 +35,7 @@ def test_parse_job_description_from_raw_text():
 
 def test_parse_job_description_from_pdf(sample_pdf):
     text = parse_job_description(file_path=sample_pdf)
-    assert "Priyanshu Kumar" in text
+    assert "Priyanshu De" in text
 
 
 def test_parse_job_description_requires_one_input():
