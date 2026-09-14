@@ -13,7 +13,11 @@ def get_anthropic_client() -> Any:
 
 
 def get_anthropic_model() -> str:
-    return os.getenv("HAIKU_MODEL", "claude-haiku-4-5")
+    return os.getenv("HAIKU_MODEL", "claude-haiku-4-5-20251001")
+
+
+def get_sonnet_model() -> str:
+    return os.getenv("SONNET_MODEL", "claude-sonnet-5")
 
 
 def generate_with_anthropic(

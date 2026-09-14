@@ -12,6 +12,10 @@ python-multipart==0.0.20
 # Settings / env
 python-dotenv==1.0.1
 
+# LLM provider clients
+anthropic==0.42.0
+openai==1.59.7
+
 # Testing
 pytest==8.3.4
 httpx==0.28.1
