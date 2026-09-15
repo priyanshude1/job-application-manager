@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -24,7 +24,7 @@ class ApplicationCreate(BaseModel):
     resume_id: int
     job_id: int
     submission_method: Literal["manual", "automatic"]
-    date_applied: datetime | None = None
+    submitted_at: datetime | None = None
     notes: str | None = None
 
 
@@ -32,6 +32,8 @@ class ApplicationUpdate(BaseModel):
     status: ApplicationStatus | None = None
     notes: str | None = None
     match_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    confirmed_at: datetime | None = None
+    confirmation_source: Literal["email", "manual"] | None = None
 
 
 def _serialize_application(application, include_documents: bool = False) -> dict:
@@ -40,10 +42,12 @@ def _serialize_application(application, include_documents: bool = False) -> dict
         "resume_id": application.resume_id,
         "job_id": application.job_id,
         "submission_method": application.submission_method,
-        "date_applied": application.date_applied,
+        "submitted_at": application.submitted_at,
         "status": application.status,
         "match_score": application.match_score,
         "notes": application.notes,
+        "confirmed_at": application.confirmed_at,
+        "confirmation_source": application.confirmation_source,
     }
     if include_documents:
         result["documents"] = [
@@ -51,6 +55,7 @@ def _serialize_application(application, include_documents: bool = False) -> dict
                 "id": document.id,
                 "doc_type": document.doc_type,
                 "content_text": document.content_text,
+                "match_score": document.match_score,
                 "file_path": document.file_path,
                 "prompt_version": document.prompt_version,
                 "created_at": document.created_at,
@@ -72,7 +77,7 @@ def create_application(payload: ApplicationCreate, db: Session = Depends(get_db)
         resume_id=payload.resume_id,
         job_id=payload.job_id,
         submission_method=payload.submission_method,
-        date_applied=payload.date_applied,
+        submitted_at=payload.submitted_at,
         notes=payload.notes,
     )
     return _serialize_application(application)
@@ -82,9 +87,10 @@ def create_application(payload: ApplicationCreate, db: Session = Depends(get_db)
 def list_applications(
     status: ApplicationStatus | None = None,
     company: str | None = None,
+    min_score: float | None = Query(default=None, ge=0.0, le=1.0),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    applications = crud.list_applications(db, status=status, company=company)
+    applications = crud.list_applications(db, status=status, company=company, min_score=min_score)
     return [_serialize_application(application) for application in applications]
 
 

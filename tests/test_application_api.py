@@ -39,6 +39,8 @@ def test_application_crud_endpoints(client):
     application_id = created.json()["id"]
     assert created.json()["status"] == "Applied"
     assert created.json()["submission_method"] == "manual"
+    assert created.json()["submitted_at"] is not None
+    assert created.json()["confirmed_at"] is None
 
     listed = client.get("/applications?company=Acme")
     assert listed.status_code == 200
