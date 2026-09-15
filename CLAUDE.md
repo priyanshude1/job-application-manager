@@ -167,21 +167,33 @@ job_descriptions
     url             TEXT (nullable — paste the job URL for reference)
 
 applications
-    id              INTEGER PRIMARY KEY
-    resume_id       INTEGER FK → resumes.id
-    job_id          INTEGER FK → job_descriptions.id
-    date_applied    DATETIME
-    status          TEXT  -- Applied|Interview Scheduled|Interview Done|Offer|Rejected|Ghosted
-    match_score     REAL  -- 0.0 to 1.0
-    notes           TEXT
-    created_at      DATETIME
-    updated_at      DATETIME
+    id                    INTEGER PRIMARY KEY
+    resume_id             INTEGER FK → resumes.id
+    job_id                INTEGER FK → job_descriptions.id
+    submission_method     TEXT  -- manual|automatic (automatic reserved for a future
+                          automated-submission feature; no special logic yet)
+    submitted_at          DATETIME NOT NULL  -- when actually submitted; defaults to
+                          now at creation, can be explicitly backdated
+    status                TEXT  -- Applied|Interview Scheduled|Interview Done|Offer|Rejected|Ghosted
+    match_score           REAL  -- 0.0 to 1.0; denormalized snapshot copied from the latest
+                          generated_documents(doc_type='score') row for this resume_id+job_id
+                          at application-creation time
+    notes                 TEXT
+    confirmed_at          DATETIME  -- nullable; set once the submission is confirmed
+    confirmation_source   TEXT  -- nullable; 'email' or 'manual'
+    created_at            DATETIME
+    updated_at            DATETIME
 
 generated_documents
     id              INTEGER PRIMARY KEY
-    application_id  INTEGER FK → applications.id
-    doc_type        TEXT  -- cover_letter|cv_latex|cv_pdf|tailoring_suggestions
-    content_text    TEXT  -- raw text or LaTeX source
+    application_id  INTEGER FK → applications.id (nullable — set once the resume/job
+                    pair is actually submitted; NULL while still a pre-submission prep artifact)
+    resume_id       INTEGER FK → resumes.id
+    job_id          INTEGER FK → job_descriptions.id
+    doc_type        TEXT  -- cover_letter|cv_latex|cv_pdf|score
+    content_text    TEXT  -- raw text, LaTeX source, or (doc_type='score') gap-analysis text
+    match_score     REAL  -- nullable; 0.0 to 1.0, only for doc_type='score' rows — produced
+                    together with content_text's gap analysis by one score_match() call
     file_path       TEXT  -- path to compiled PDF if applicable
     prompt_version  TEXT  -- MLflow run ID for this generation
     created_at      DATETIME
@@ -192,10 +204,12 @@ email_events
     received_at     DATETIME
     subject         TEXT
     snippet         TEXT  -- first 200 chars of email body
-    detected_intent TEXT  -- interview_invite|rejection|offer|follow_up|unknown
+    detected_intent TEXT  -- interview_invite|rejection|offer|follow_up|submission_confirmation|unknown
     status_change   TEXT  -- what status was set as a result (nullable)
     raw_email_id    TEXT  -- Gmail message ID for deduplication
 ```
+
+**An `applications` row exists only once you've actually submitted** — there is no earlier "considering"/"queued" stage in this table. A resume + job description existing (via `resumes`/`job_descriptions`) is enough to prepare for a job; it does not by itself mean you applied. Cover letters, tailored CVs, and match scores generated during that prep phase live in `generated_documents`, keyed directly on `(resume_id, job_id)` — not on an application, since none may exist yet. When you do submit and an `applications` row is created, any `generated_documents` rows still unlinked (`application_id IS NULL`) for that same `(resume_id, job_id)` pair are automatically backfilled onto it, and the newest `doc_type='score'` row's `match_score` is copied onto the new application as a queryable snapshot.
 
 ---
 
@@ -238,6 +252,8 @@ Flow:
 Deduplication: `raw_email_id` (Gmail message ID) prevents the same email being processed twice.
 
 Manual review: all auto-detected status changes shown in dashboard with email snippet — user can override if parsing was wrong.
+
+Submission confirmation: a detected intent of `submission_confirmation` — a company confirming a submission actually went through — is handled distinctly from status-change intents. Since confirmation rarely arrives for every application, it isn't required to create the `applications` row (that already happened at submission time); when matched, it instead `PATCH`es the existing `/applications/{id}` with `confirmed_at`/`confirmation_source='email'`, the same endpoint a manual "no email arrived, I'm confirming it myself" action uses.
 
 ---
 
@@ -344,16 +360,18 @@ POST /jobs/upload                → parse + store job description PDF
 POST /jobs/paste                 → store raw text job description
 
 # Applications
-POST   /applications             → create new application record
-GET    /applications             → list all with filters (status, score, company)
+POST   /applications             → create new application record (requires an actual
+                                    submission — submitted_at defaults to now if omitted)
+GET    /applications             → list all with filters (status, min_score, company)
 GET    /applications/{id}        → single application with all documents
-PATCH  /applications/{id}        → update status, notes
+PATCH  /applications/{id}        → update status, notes, match_score, confirmed_at,
+                                    confirmation_source
 DELETE /applications/{id}        → remove application
 
 # Generation
-POST /generate/cover-letter      → body: {application_id}
-POST /generate/tailor-cv         → body: {application_id}
-POST /generate/score             → body: {application_id}
+POST /generate/cover-letter      → body: {resume_id, job_id}
+POST /generate/tailor-cv         → body: {resume_id, job_id}
+POST /generate/score             → body: {resume_id, job_id}
 
 # Email
 POST /emails/sync                → trigger Gmail MCP fetch + parse + status updates
@@ -473,6 +491,9 @@ Total: ~16 days. Buffer for debugging built into each phase estimate.
 - OpenRouter free models have rate limits and may change availability
 - Anthropic model names subject to change — always configurable via env vars
 - MLflow local server — not accessible outside Docker network without extra config
+- `submission_method='automatic'` is reserved for a future automated-submission feature — no
+  automatic-submission logic is implemented; all applications today are created with
+  `submission_method='manual'`
 
 ---
 
