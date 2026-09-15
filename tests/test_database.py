@@ -34,7 +34,9 @@ def test_application_lifecycle(db):
     resume = crud.create_resume(db, filename="r.pdf", file_path="/data/resumes/r.pdf")
     job = crud.create_job_description(db, company="Acme", role="Backend Engineer")
 
-    application = crud.create_application(db, resume_id=resume.id, job_id=job.id)
+    application = crud.create_application(
+        db, resume_id=resume.id, job_id=job.id, submission_method="manual"
+    )
     assert application.status == "Applied"
 
     updated = crud.update_application(db, application.id, status="Interview Scheduled")
@@ -51,7 +53,9 @@ def test_application_lifecycle(db):
 def test_application_cascade_deletes_documents(db):
     resume = crud.create_resume(db, filename="r.pdf", file_path="/data/resumes/r.pdf")
     job = crud.create_job_description(db, company="Acme", role="Backend Engineer")
-    application = crud.create_application(db, resume_id=resume.id, job_id=job.id)
+    application = crud.create_application(
+        db, resume_id=resume.id, job_id=job.id, submission_method="automatic"
+    )
 
     crud.create_generated_document(db, application_id=application.id, doc_type="cover_letter")
     assert len(crud.list_documents_for_application(db, application.id)) == 1
@@ -63,7 +67,9 @@ def test_application_cascade_deletes_documents(db):
 def test_email_event_deduplication(db):
     resume = crud.create_resume(db, filename="r.pdf", file_path="/data/resumes/r.pdf")
     job = crud.create_job_description(db, company="Acme", role="Backend Engineer")
-    application = crud.create_application(db, resume_id=resume.id, job_id=job.id)
+    application = crud.create_application(
+        db, resume_id=resume.id, job_id=job.id, submission_method="manual"
+    )
 
     first = crud.create_email_event(
         db, raw_email_id="msg-1", application_id=application.id, detected_intent="interview_invite"

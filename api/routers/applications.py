@@ -23,7 +23,7 @@ router = APIRouter(prefix="/applications", tags=["applications"])
 class ApplicationCreate(BaseModel):
     resume_id: int
     job_id: int
-    status: ApplicationStatus = "Applied"
+    submission_method: Literal["manual", "automatic"]
     date_applied: datetime | None = None
     notes: str | None = None
 
@@ -39,6 +39,7 @@ def _serialize_application(application, include_documents: bool = False) -> dict
         "id": application.id,
         "resume_id": application.resume_id,
         "job_id": application.job_id,
+        "submission_method": application.submission_method,
         "date_applied": application.date_applied,
         "status": application.status,
         "match_score": application.match_score,
@@ -70,7 +71,7 @@ def create_application(payload: ApplicationCreate, db: Session = Depends(get_db)
         db,
         resume_id=payload.resume_id,
         job_id=payload.job_id,
-        status=payload.status,
+        submission_method=payload.submission_method,
         date_applied=payload.date_applied,
         notes=payload.notes,
     )

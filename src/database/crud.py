@@ -63,14 +63,15 @@ def create_application(
     db: Session,
     resume_id: int,
     job_id: int,
-    status: str = "Applied",
+    submission_method: str,
     date_applied: datetime | None = None,
     notes: str | None = None,
 ) -> Application:
     application = Application(
         resume_id=resume_id,
         job_id=job_id,
-        status=status,
+        submission_method=submission_method,
+        status="Applied",
         date_applied=date_applied or utcnow(),
         notes=notes,
     )

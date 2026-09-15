@@ -28,11 +28,17 @@ def test_application_crud_endpoints(client):
 
     created = client.post(
         "/applications",
-        json={"resume_id": resume_id, "job_id": job_id, "notes": "Follow up next week"},
+        json={
+            "resume_id": resume_id,
+            "job_id": job_id,
+            "submission_method": "manual",
+            "notes": "Follow up next week",
+        },
     )
     assert created.status_code == 201
     application_id = created.json()["id"]
     assert created.json()["status"] == "Applied"
+    assert created.json()["submission_method"] == "manual"
 
     listed = client.get("/applications?company=Acme")
     assert listed.status_code == 200
@@ -56,7 +62,13 @@ def test_application_crud_endpoints(client):
 
 
 def test_application_api_validates_references_and_fields(client):
-    missing_reference = client.post("/applications", json={"resume_id": 999, "job_id": 999})
+    missing_method = client.post("/applications", json={"resume_id": 999, "job_id": 999})
+    assert missing_method.status_code == 422
+
+    missing_reference = client.post(
+        "/applications",
+        json={"resume_id": 999, "job_id": 999, "submission_method": "automatic"},
+    )
     assert missing_reference.status_code == 404
 
     invalid_score = client.patch("/applications/999", json={"match_score": 1.1})

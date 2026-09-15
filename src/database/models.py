@@ -44,6 +44,7 @@ class Application(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id"))
     job_id: Mapped[int] = mapped_column(ForeignKey("job_descriptions.id"))
+    submission_method: Mapped[str] = mapped_column(String, nullable=False)
     date_applied: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String, default="Applied")
     match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
