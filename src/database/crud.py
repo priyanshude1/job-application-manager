@@ -64,18 +64,35 @@ def create_application(
     resume_id: int,
     job_id: int,
     submission_method: str,
-    date_applied: datetime | None = None,
+    submitted_at: datetime | None = None,
     notes: str | None = None,
 ) -> Application:
+    latest_score = (
+        db.query(GeneratedDocument)
+        .filter(
+            GeneratedDocument.resume_id == resume_id,
+            GeneratedDocument.job_id == job_id,
+            GeneratedDocument.doc_type == "score",
+        )
+        .order_by(GeneratedDocument.created_at.desc())
+        .first()
+    )
+
     application = Application(
         resume_id=resume_id,
         job_id=job_id,
         submission_method=submission_method,
         status="Applied",
-        date_applied=date_applied or utcnow(),
+        submitted_at=submitted_at or utcnow(),
+        match_score=latest_score.match_score if latest_score else None,
         notes=notes,
     )
     db.add(application)
+    db.flush()  # assigns application.id without committing, so we can link documents below
+
+    for document in list_unlinked_documents_for_pair(db, resume_id, job_id):
+        document.application_id = application.id
+
     db.commit()
     db.refresh(application)
     return application
@@ -86,13 +103,18 @@ def get_application(db: Session, application_id: int) -> Application | None:
 
 
 def list_applications(
-    db: Session, status: str | None = None, company: str | None = None
+    db: Session,
+    status: str | None = None,
+    company: str | None = None,
+    min_score: float | None = None,
 ) -> list[Application]:
     query = db.query(Application)
     if status is not None:
         query = query.filter(Application.status == status)
     if company is not None:
         query = query.join(JobDescription).filter(JobDescription.company == company)
+    if min_score is not None:
+        query = query.filter(Application.match_score >= min_score)
     return list(query.order_by(Application.created_at.desc()).all())
 
 
@@ -102,6 +124,8 @@ def update_application(
     status: str | None = None,
     notes: str | None = None,
     match_score: float | None = None,
+    confirmed_at: datetime | None = None,
+    confirmation_source: str | None = None,
 ) -> Application | None:
     application = db.get(Application, application_id)
     if application is None:
@@ -112,6 +136,10 @@ def update_application(
         application.notes = notes
     if match_score is not None:
         application.match_score = match_score
+    if confirmed_at is not None:
+        application.confirmed_at = confirmed_at
+    if confirmation_source is not None:
+        application.confirmation_source = confirmation_source
     application.updated_at = utcnow()
     db.commit()
     db.refresh(application)
@@ -132,16 +160,22 @@ def delete_application(db: Session, application_id: int) -> bool:
 
 def create_generated_document(
     db: Session,
-    application_id: int,
+    resume_id: int,
+    job_id: int,
     doc_type: str,
+    application_id: int | None = None,
     content_text: str | None = None,
     file_path: str | None = None,
     prompt_version: str | None = None,
+    match_score: float | None = None,
 ) -> GeneratedDocument:
     document = GeneratedDocument(
         application_id=application_id,
+        resume_id=resume_id,
+        job_id=job_id,
         doc_type=doc_type,
         content_text=content_text,
+        match_score=match_score,
         file_path=file_path,
         prompt_version=prompt_version,
     )
@@ -156,6 +190,25 @@ def list_documents_for_application(db: Session, application_id: int) -> list[Gen
         db.query(GeneratedDocument)
         .filter(GeneratedDocument.application_id == application_id)
         .order_by(GeneratedDocument.created_at.desc())
+        .all()
+    )
+
+
+def list_unlinked_documents_for_pair(
+    db: Session, resume_id: int, job_id: int
+) -> list[GeneratedDocument]:
+    """Prep-stage documents for a resume/job pair not yet linked to an application.
+
+    Used by create_application to backfill application_id onto whatever cover
+    letter, tailored CV, or score was generated before the user actually submitted.
+    """
+    return list(
+        db.query(GeneratedDocument)
+        .filter(
+            GeneratedDocument.resume_id == resume_id,
+            GeneratedDocument.job_id == job_id,
+            GeneratedDocument.application_id.is_(None),
+        )
         .all()
     )
 
