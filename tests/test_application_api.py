@@ -1,20 +1,33 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+import src.database.connection as connection
 from api.main import app
 from src.database import crud
-from src.database.connection import SessionLocal
 
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    # A relative sqlite:// URL resolves to an absolute path once, at
+    # create_engine() time -- not dynamically per connection -- so chdir()
+    # here would NOT isolate the database file per test (confirmed by direct
+    # testing). Pointing engine/SessionLocal at a real per-test file under
+    # tmp_path is what actually isolates each test's data.
+    test_engine = create_engine(
+        f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False}
+    )
+    monkeypatch.setattr(connection, "engine", test_engine)
+    monkeypatch.setattr(
+        connection, "SessionLocal", sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
+    )
     with TestClient(app) as test_client:
         yield test_client
 
 
 def _create_source_records(client):
-    db = SessionLocal()
+    db = connection.SessionLocal()
     try:
         resume = crud.create_resume(db, "resume.pdf", "/tmp/resume.pdf", "Python engineer")
         job = crud.create_job_description(db, "Acme", "Backend Engineer", "Need Python.")
@@ -130,7 +143,7 @@ def test_list_applications_filters_by_min_score(client):
 def test_application_creation_backfills_and_snapshots_score_document(client):
     resume_id, job_id = _create_source_records(client)
 
-    db = SessionLocal()
+    db = connection.SessionLocal()
     try:
         crud.create_generated_document(
             db, resume_id=resume_id, job_id=job_id, doc_type="score",

@@ -1,7 +1,10 @@
 import fitz
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+import src.database.connection as connection
 from api.main import app
 from src.document_processing.jd_parser import parse_job_description
 from src.document_processing.resume_parser import parse_resume_pdf
@@ -45,7 +48,17 @@ def test_parse_job_description_requires_one_input():
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    # A relative sqlite:// URL resolves once, tied to connection.py's module-level
+    # engine -- chdir() alone does not isolate the DB file per test (confirmed by
+    # direct testing). An absolute per-test path does.
+    test_engine = create_engine(
+        f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False}
+    )
+    monkeypatch.setattr(connection, "engine", test_engine)
+    monkeypatch.setattr(
+        connection, "SessionLocal", sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
+    )
+    monkeypatch.chdir(tmp_path)  # still isolates uploaded-file storage under DATA_DIR
     with TestClient(app) as test_client:
         yield test_client
 
