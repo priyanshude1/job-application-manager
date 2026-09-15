@@ -22,6 +22,7 @@ class Resume(Base):
     file_path: Mapped[str] = mapped_column(String)
 
     applications: Mapped[list["Application"]] = relationship(back_populates="resume")
+    documents: Mapped[list["GeneratedDocument"]] = relationship(back_populates="resume")
 
 
 class JobDescription(Base):
@@ -36,6 +37,7 @@ class JobDescription(Base):
     url: Mapped[str | None] = mapped_column(String, nullable=True)
 
     applications: Mapped[list["Application"]] = relationship(back_populates="job")
+    documents: Mapped[list["GeneratedDocument"]] = relationship(back_populates="job")
 
 
 class Application(Base):
@@ -45,10 +47,12 @@ class Application(Base):
     resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id"))
     job_id: Mapped[int] = mapped_column(ForeignKey("job_descriptions.id"))
     submission_method: Mapped[str] = mapped_column(String, nullable=False)
-    date_applied: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     status: Mapped[str] = mapped_column(String, default="Applied")
     match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    confirmation_source: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow
