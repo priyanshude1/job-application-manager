@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
 
-from api.routers import documents
+from api.routers import applications, documents
 from src.database.connection import SessionLocal, init_db
 
 
@@ -15,6 +15,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Job Application Manager", lifespan=lifespan)
 app.include_router(documents.router)
+app.include_router(applications.router)
 
 
 @app.get("/health")
