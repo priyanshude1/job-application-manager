@@ -1,0 +1,572 @@
+================================================================================
+JOB APPLICATION MANAGER (JAM) — REPOSITORY MAP & KEY LEARNINGS
+================================================================================
+This file is a guided tour of the codebase as it exists today, written to be
+read start to finish. For each folder: why it exists as a separate folder at
+all. For each .py file: what it does, why it exists as its own file rather
+than being folded into another one, and which other files it talks to.
+
+Current build status (per CLAUDE.md's phase plan):
+  Phase 1 (project setup / DB / health)        -- DONE
+  Phase 2 (document processing, uploads)        -- DONE
+  Phase 3 (LLM pipelines + MLflow)              -- DONE
+  Phase 4 (LangGraph agent)                     -- NOT STARTED (empty scaffold only)
+  Phase 5 (Gmail MCP email parsing)             -- NOT STARTED
+  Phase 6 (CI/CD)                               -- NOT STARTED
+  Phase 7 (frontend dashboard)                  -- NOT STARTED (empty scaffold only)
+  Phase 8 (Docker polish)                       -- partially done (Dockerfile/compose exist,
+                                                    but incomplete -- see notes below)
+
+The one architectural rule that explains almost every design choice below:
+"applications" IS THE BOUNDARY BETWEEN PREP AND COMMITMENT. A resume and a job
+description existing is enough to prepare (tailor a CV, write a cover letter,
+score the match) -- it does NOT mean you applied. An `applications` row is
+only created once you've actually submitted, on the real company site. This
+is why generated_documents is keyed on (resume_id, job_id) rather than on
+application_id, and it's the single biggest thing to hold in your head while
+reading src/database/models.py.
+
+================================================================================
+TOP-LEVEL LAYOUT
+================================================================================
+job-application-manager/
+├── api/                  <- the HTTP layer (FastAPI). Thin. No business logic.
+├── src/                  <- the actual business logic, organized by concern.
+├── tests/                <- one test file per thing under test, pytest-based.
+├── templates/             <- your real LaTeX CV template goes here (gitignored).
+├── data/resumes/          <- uploaded resume PDFs land here (gitignored).
+├── outputs/generated/     <- compiled tailored CV PDFs land here (gitignored).
+├── mlruns/                <- MLflow's local experiment-tracking data (gitignored).
+├── .github/                <- GitHub Copilot instructions (editor tooling, not app code).
+├── .claude/skills/         <- Claude Code custom skills used during development sessions.
+├── CLAUDE.md               <- the project's single source of truth / design manifest.
+├── Dockerfile, docker-compose.yml  <- container build + local multi-service run.
+├── requirements.txt        <- pinned Python dependencies.
+├── .env / .env.example     <- real secrets (gitignored) / the template for them.
+└── .gitignore               <- keeps secrets, real data, and caches out of git.
+
+The api/ vs src/ split is the most important structural decision in this repo,
+so it's worth stating explicitly: **api/ is not allowed to contain business
+logic.** Every router function's job is to (1) parse/validate the HTTP
+request via a Pydantic model, (2) call into src/ to actually do something,
+(3) shape the result back into JSON. This means src/'s functions are all
+callable and testable completely independently of FastAPI or HTTP -- which is
+exactly why tests/test_database.py and tests/test_scoring.py etc. never
+import anything from api/, while tests/test_application_api.py (which tests
+the HTTP layer itself) does.
+
+================================================================================
+api/ -- THE HTTP LAYER
+================================================================================
+This directory's only job is translating HTTP requests into calls against
+src/, and src/'s return values back into JSON responses. If you deleted api/
+entirely and wrote a CLI instead, every file in src/ would still work
+unchanged -- that's the test of whether the separation is actually clean.
+
+--------------------------------------------------------------------------------
+api/__init__.py
+--------------------------------------------------------------------------------
+Empty. Exists purely so Python treats `api/` as a package, which is what lets
+other files write `from api.main import app` and `from api.routers import
+applications` instead of manipulating sys.path manually. This is boilerplate
+you'll see at the top of every folder in this repo that's meant to be
+imported from elsewhere (as opposed to tests/, which pytest discovers by file
+name and doesn't need to be an importable package).
+
+--------------------------------------------------------------------------------
+api/main.py
+--------------------------------------------------------------------------------
+The actual FastAPI application object lives here -- this is the file uvicorn
+points at (see the Dockerfile's CMD: `uvicorn api.main:app`). It does three
+things: (1) defines a `lifespan` context manager that calls `init_db()` once
+when the app starts up, so the database schema is guaranteed to exist/be
+migrated before the first request is ever handled; (2) creates the `FastAPI`
+app instance and mounts both routers (`documents.router`, `applications.
+router`) onto it via `app.include_router(...)`; (3) defines the `/health`
+endpoint directly (rather than in its own router, since it's a single,
+simple, cross-cutting check) which opens a throwaway DB session and runs
+`SELECT 1` to prove the database is actually reachable, not just configured.
+Every test that uses a `TestClient` (in test_application_api.py and
+test_document_processing.py) imports `app` from this exact file.
+
+--------------------------------------------------------------------------------
+api/routers/__init__.py
+--------------------------------------------------------------------------------
+Empty, same reason as api/__init__.py -- makes `api.routers` importable as a
+package so `from api.routers import applications, documents` works cleanly
+inside api/main.py.
+
+--------------------------------------------------------------------------------
+api/routers/applications.py
+--------------------------------------------------------------------------------
+Every endpoint under the `/applications` prefix lives here: POST (create),
+GET (list, with status/company/min_score filters), GET /{id} (single
+application with its documents), PATCH /{id} (update status/notes/match_score
+/confirmed_at/confirmation_source), DELETE /{id}. It defines its own Pydantic
+request/response shapes (`ApplicationCreate`, `ApplicationUpdate`) separately
+from the SQLAlchemy models in src/database/models.py -- this is deliberate:
+the API's input contract (what a client is allowed to send) and the
+database's storage shape are different concerns that happen to overlap, and
+keeping them as separate classes means changing one doesn't silently change
+the other. Every handler in this file depends on `src/database/crud.py` for
+all actual reads/writes and on `src/database/connection.py`'s `get_db` for a
+request-scoped database session (via FastAPI's `Depends(get_db)`). Its
+`_serialize_application` helper is the one place that decides exactly what
+JSON shape an application takes on the wire, including whether its nested
+documents are included.
+
+--------------------------------------------------------------------------------
+api/routers/documents.py
+--------------------------------------------------------------------------------
+Handles resume and job-description ingestion: `POST /resume/upload`, `POST
+/jobs/upload` (PDF), `POST /jobs/paste` (raw text). Its `_save_upload` helper
+is the one place in the whole app that writes an uploaded file to disk --
+it generates a collision-proof filename with `uuid.uuid4().hex` prefixed onto
+the original name, and rejects anything that isn't a `.pdf` up front with a
+clear 400 error rather than letting a bad file fail deep inside PyMuPDF with
+a confusing traceback. It depends on `src/document_processing/resume_parser.
+py` and `jd_parser.py` to turn the raw bytes into clean text, and on `src/
+database/crud.py` to persist the result. `DATA_DIR`/`RESUMES_DIR`/
+`JOB_DESCRIPTIONS_DIR` are read from the `DATA_DIR` env var so where files
+land is configurable without a code change, same philosophy as the model
+routing table.
+
+--------------------------------------------------------------------------------
+api/static/  (empty folder, only a placeholder exists)
+--------------------------------------------------------------------------------
+Reserved for Phase 7 -- the Tailwind dashboard UI (`index.html` per CLAUDE.md's
+planned structure). Nothing lives here yet; the folder exists now purely so
+the eventual FastAPI static-file mount has a real place to point at when that
+phase starts.
+
+================================================================================
+src/ -- THE ACTUAL APPLICATION LOGIC
+================================================================================
+Everything that isn't "translate HTTP" lives here, organized into
+subpackages by concern (database, document parsing, LLM pipelines,
+experiment tracking, and eventually the agent). This is the layer with real
+unit test coverage, because none of it depends on a running web server.
+
+--------------------------------------------------------------------------------
+src/__init__.py
+--------------------------------------------------------------------------------
+Empty. Makes `src` importable as a package so every file elsewhere in the
+repo can write `from src.database import crud` etc. instead of relative-
+import gymnastics. This single file is why the whole codebase can consistently
+use absolute imports rooted at the repo's top level.
+
+--------------------------------------------------------------------------------
+src/database/  -- persistence layer
+--------------------------------------------------------------------------------
+The only part of the codebase allowed to know SQL/SQLAlchemy exists. Every
+other file that needs data reads or writes goes through this package's crud.
+py functions -- nothing else in the repo constructs a raw SQLAlchemy query.
+
+src/database/__init__.py
+    Empty, package marker, same role as every other __init__.py in this repo.
+
+src/database/models.py
+    Defines the five SQLAlchemy ORM table classes: Resume, JobDescription,
+    Application, GeneratedDocument, EmailEvent, plus the shared Base
+    (DeclarativeBase) they all inherit from and a small `utcnow()` helper used
+    as the default for every timestamp column so "now" is computed
+    consistently in one place instead of `datetime.now()` scattered around.
+    This file is the literal, authoritative definition of the database
+    schema -- CLAUDE.md's "Database Schema" section is documentation *of*
+    this file, not the other way around, so if the two ever disagree, this
+    file is what's actually running. It uses SQLAlchemy 2.0's typed
+    `Mapped[...]`/`mapped_column(...)` style throughout, and every foreign-
+    key column (e.g. Application.resume_id) has a matching `relationship()`
+    declared on both sides (e.g. Application.resume <-> Resume.applications)
+    so Python code can navigate either direction without hand-writing joins.
+    Every other file in src/database/ and every LLM/API file that touches the
+    database ultimately imports its shapes from here.
+
+src/database/connection.py
+    Owns exactly one thing: how the app actually talks to the physical
+    database file. It builds the single, shared `engine` and `SessionLocal`
+    (a session factory) from the `DATABASE_URL` env var at import time, and
+    defines `get_db()` -- a generator that yields one request-scoped session
+    and always closes it in a `finally` block, which is what FastAPI's
+    `Depends(get_db)` calls on every request needing DB access. It also owns
+    `init_db()`, called once at app startup (from api/main.py's lifespan):
+    first it runs `Base.metadata.create_all()` (creates any tables that don't
+    exist yet, no-op for ones that do), then it runs two hand-written,
+    idempotent migration functions (`_migrate_applications_table`,
+    `_migrate_generated_documents_table`) that bring an *already-existing*
+    older-shaped database up to the current schema -- because SQLite has no
+    `ALTER COLUMN`, the generated_documents migration specifically does a
+    full rebuild (rename old table, create the new shape, copy data across
+    with a JOIN back through applications to recover the new resume_id/job_id
+    columns, drop the old table) rather than a simple ADD COLUMN. This file
+    is also where a real, hard-won lesson from this project lives: a relative
+    `sqlite:///./jam.db` URL resolves to an absolute path tied to whatever
+    the process's working directory was at first use of this module's
+    engine -- NOT dynamically per connection -- which is why every test that
+    needs real database isolation builds its own engine with an *absolute*
+    path and monkeypatches it onto `connection.engine`/`connection.
+    SessionLocal`, rather than relying on `os.chdir()` alone.
+
+src/database/crud.py
+    Every actual database read/write operation as a plain function taking a
+    `Session` as its first argument -- no classes, no repository pattern,
+    just functions grouped by table under comment headers (# --- Resumes ---,
+    # --- Applications ---, etc.). This is the only file api/routers/*.py is
+    allowed to import for data access, which is what keeps the "no business
+    logic in api/" rule enforceable. The most structurally important function
+    here is `create_application`: because an Application row can only be
+    created at actual-submission time (see the architectural rule at the top
+    of this file), this function also does the work of finding any
+    already-generated documents for the same (resume_id, job_id) pair that
+    were created *before* submission (cover letter, tailored CV, score) and
+    linking them onto the new application (`list_unlinked_documents_for_pair`
+    + a loop setting `document.application_id`), plus copying the most
+    recent score document's `match_score` onto the new application as a
+    queryable snapshot. It uses `db.flush()` (write pending changes and
+    get the new row's id back, without committing yet) specifically so it
+    can use that id to link the documents in the same transaction before the
+    final `db.commit()`.
+
+--------------------------------------------------------------------------------
+src/document_processing/  -- turns uploaded files into plain text
+--------------------------------------------------------------------------------
+Exists as its own package because "get clean text out of a PDF" is a
+self-contained concern used by exactly one thing (document upload) and
+needed nowhere else -- separating it from api/routers/documents.py means the
+parsing logic is unit-testable without spinning up FastAPI at all (see
+tests/test_document_processing.py's non-`client` tests).
+
+src/document_processing/__init__.py
+    Empty, package marker.
+
+src/document_processing/resume_parser.py
+    One function, `parse_resume_pdf(file_path)`. Opens the PDF with PyMuPDF
+    (imported as `fitz`), pulls `.get_text()` off every page, and joins them
+    with blank lines. This is the *only* way resume text ever enters the
+    system -- its output is exactly what gets written to `resumes.
+    parsed_text` by `api/routers/documents.py`'s upload handler, and every
+    downstream LLM pipeline (cover letter generation, scoring, CV tailoring)
+    reads that stored text rather than ever touching a PDF file again. Kept
+    to a single function because there's genuinely only one thing to do here
+    -- no config, no options, just "PDF path in, text out."
+
+src/document_processing/jd_parser.py
+    One function, `parse_job_description(raw_text=None, file_path=None)`,
+    that exists specifically to erase the difference between the two input
+    methods CLAUDE.md's "Job Description Input" section describes (pasted
+    text vs. uploaded PDF). Whichever one the caller provides, the function
+    returns the same shape of plain text, written into `job_descriptions.
+    raw_text` -- so every downstream consumer of a job description never
+    needs to know or care whether the original source was a paste or a PDF.
+    Raises `ValueError` if neither input is given, since silently returning
+    empty text there would hide a real caller bug.
+
+--------------------------------------------------------------------------------
+src/llm/  -- every LLM-backed generation pipeline
+--------------------------------------------------------------------------------
+The three "do something with Claude" features (cover letter, job-match
+scoring, LaTeX CV tailoring) plus the shared client plumbing they all sit on
+top of. Every public function in this package takes its LLM call as an
+injectable `generator` parameter defaulting to the real Anthropic call --
+this single design choice is why none of the tests in tests/test_cover_
+letter.py, test_scoring.py, or test_cv_tailoring.py need a real API key or
+hit the network: a test just passes a plain Python function that returns a
+canned string instead.
+
+src/llm/__init__.py
+    Empty, package marker.
+
+src/llm/clients.py
+    The only file allowed to import the `anthropic` or `openai` SDKs
+    directly (and it imports them lazily, *inside* the functions that need
+    them, specifically so importing this module doesn't require either
+    package to be installed unless you actually call a function that uses
+    it). Defines `get_anthropic_client`/`get_anthropic_model`/`generate_with_
+    anthropic` and the equivalent OpenRouter trio. Every model ID is read
+    from an env var (`HAIKU_MODEL`, `SONNET_MODEL`, `OPENROUTER_MODEL`) with
+    a hardcoded fallback default -- never a bare string typed elsewhere in
+    the codebase -- which is the literal implementation of CLAUDE.md's "Model
+    Routing" rule. `generate_with_anthropic` and `generate_with_openrouter`
+    are the two functions every other src/llm/*.py file's `generator`
+    parameter defaults to.
+
+src/llm/cover_letter.py
+    One function, `generate_cover_letter(resume_text, job_text, company,
+    role, *, generator=generate_with_anthropic)`. Builds a single prompt
+    instructing the model to write a concise, truthful, resume-grounded
+    cover letter, calls `generator(...)`, strips the result, and returns it.
+    Deliberately single-turn/stateless -- no conversation history, no
+    context accumulation -- matching CLAUDE.md's "Context Window Strategy"
+    note that document-generation tasks reset per call.
+
+src/llm/scoring.py
+    One function, `score_match(resume_text, job_text, *, generator=...)`,
+    that asks the model for strict JSON (`{"match_score": ..., "gap_
+    analysis": ...}`), parses it, and clamps `match_score` into [0.0, 1.0]
+    defensively in case the model returns something out of range. Includes
+    a small `_strip_code_fence` helper because real models frequently wrap
+    JSON answers in a markdown ```json fence even when told not to -- this
+    function's whole job is turning "probably-JSON text from an LLM" into
+    "a dict you can trust the shape of." Its output is what `crud.create_
+    generated_document(..., doc_type="score", match_score=..., content_
+    text=...)` persists.
+
+src/llm/cv_tailoring.py
+    The most mechanically involved pipeline, implementing CLAUDE.md's
+    "LaTeX CV Strategy" end to end. `generate_tailored_latex` asks the model
+    to edit a LaTeX template's content (not its structure/packages) to fit a
+    job, optionally with `error_feedback` from a previous failed compile
+    folded into the prompt. `compile_latex` writes that source to disk and
+    shells out to the `tectonic` CLI to produce a PDF, with the actual
+    subprocess call itself injectable (`runner` parameter) so tests never
+    need `tectonic` installed. `tailor_and_compile_cv` is the orchestrator:
+    it loops generate -> compile, and on failure feeds the compiler's error
+    back into the next generation attempt, up to `MAX_LATEX_RETRIES` (3)
+    times -- the retry-with-compiler-feedback loop CLAUDE.md calls out as
+    "essential" because LLM-generated LaTeX occasionally has syntax errors.
+
+--------------------------------------------------------------------------------
+src/tracking/  -- MLflow experiment/prompt-version logging
+--------------------------------------------------------------------------------
+src/tracking/__init__.py
+    Empty, package marker.
+
+src/tracking/mlflow_tracker.py
+    One function, `log_generation_run(...)`, meant to wrap every call into
+    src/llm/*.py: it opens an MLflow run, logs the model/prompt-template-
+    version/job_id/resume_id as params (plus arbitrary `extra_params`/
+    `extra_metrics` for pipeline-specific data like a score's match_score),
+    logs the prompt and output text as artifacts, logs an output-length
+    metric, and returns the MLflow run id -- which is exactly what
+    `generated_documents.prompt_version` is meant to store, linking every
+    generated document back to the exact prompt/model/inputs that produced
+    it. Like clients.py, it imports the real `mlflow` package lazily (only
+    inside the function, only when no `tracker` override is passed) so
+    importing this module never requires mlflow to be installed. NOTE: this
+    function is written but not yet actually called from src/llm/*.py --
+    wiring it in is the next piece of unfinished Phase 3 work.
+
+--------------------------------------------------------------------------------
+src/agent/  -- LangGraph agent (Phase 4, not started)
+--------------------------------------------------------------------------------
+src/agent/__init__.py
+    Empty. This is genuinely the *only* file in this folder right now --
+    everything else CLAUDE.md describes for this package (state.py, tools.py
+    ,nodes.py, graph.py) doesn't exist yet. The folder exists now, empty,
+    purely so the package path is already correct and importable the moment
+    Phase 4 actually starts, matching the project structure CLAUDE.md
+    committed to up front.
+
+================================================================================
+tests/ -- ONE FILE PER THING UNDER TEST
+================================================================================
+Pytest auto-discovers anything named test_*.py containing functions named
+test_*, so no central test registry exists -- the file/function naming *is*
+the registration. The overwhelming majority of tests here never touch a real
+network call, a real LLM, or (after the isolation-bug fix) the real project
+jam.db -- either by injecting a fake in place of a real dependency
+(generator/compiler/runner/tracker parameters), or by using a genuinely
+isolated in-memory or per-test-tmp-path database.
+
+tests/test_database.py
+    Tests src/database/crud.py directly against a fresh in-memory SQLite
+    database (`sqlite:///:memory:`, recreated per test via a `db` fixture) --
+    no HTTP, no FastAPI involved at all. Covers the full CRUD lifecycle for
+    every table, cascade deletes, email dedup, and the newer application-
+    creation behaviors: match_score snapshotting from the latest score
+    document, backfilling unlinked documents onto a newly-created
+    application, the min_score list filter, and setting confirmation fields.
+
+tests/test_db_migration.py
+    Tests src/database/connection.py's `init_db()` migration logic
+    specifically -- the one piece of this codebase that's genuinely risky,
+    since it rewrites real table shapes via raw SQL. Builds legacy-shaped
+    SQLite files by hand (old column names, no resume_id/job_id on
+    generated_documents), points a test engine at them via `monkeypatch.
+    setattr(connection, "engine", ...)`, and asserts the resulting schema and
+    data are correct across four scenarios: a brand-new DB, an empty legacy
+    table (drop+recreate path), a non-empty legacy table (rebuild-with-
+    backfill path, including the retired 'tailoring_suggestions' doc_type
+    being renamed to 'score' with its match_score recovered from the parent
+    application), and running the migration twice (idempotency).
+
+tests/test_application_api.py
+    Tests api/routers/applications.py through real HTTP requests via
+    FastAPI's `TestClient`, not by calling crud functions directly -- this is
+    what actually proves the Pydantic validation, status codes, and JSON
+    shapes are correct end to end. Its `client` fixture is where the
+    session's isolation-bug fix lives: it builds a fresh SQLAlchemy engine
+    bound to an absolute path under pytest's `tmp_path` and monkeypatches it
+    onto `connection.engine`/`connection.SessionLocal`, because (as
+    documented in connection.py above) a relative DB path does not isolate
+    per test on its own.
+
+tests/test_document_processing.py
+    Two things in one file: pure-function tests of `resume_parser.py`/
+    `jd_parser.py` (generating a real throwaway PDF with PyMuPDF via a
+    `sample_pdf` fixture and parsing it back), and HTTP-level tests of
+    api/routers/documents.py's three upload/paste endpoints via the same
+    `client` fixture pattern (and the same engine-isolation fix) as test_
+    application_api.py.
+
+tests/test_cover_letter.py, tests/test_scoring.py, tests/test_cv_tailoring.py
+    One file per src/llm/*.py pipeline, each following the identical shape:
+    define a `fake_generator` function that records what prompt/kwargs it
+    was called with and returns a canned string, call the real pipeline
+    function with `generator=fake_generator`, then assert both on the
+    parsed/returned result and on what got fed into the prompt (proving the
+    resume/job text actually reached the model, not just that parsing
+    works). test_scoring.py and test_cv_tailoring.py additionally cover
+    their respective defensive edge cases -- markdown-fence stripping,
+    score clamping, and (for cv_tailoring) the full generate-compile-retry
+    loop against a fake compiler.
+
+tests/test_mlflow_tracker.py
+    Tests src/tracking/mlflow_tracker.py against a hand-written `FakeTracker`
+    class that mimics mlflow's `start_run`/`log_param`/`log_text`/`log_
+    metric` API surface, so no real MLflow server or `mlruns/` write ever
+    happens in tests. Includes one deliberately unusual "negative test" --
+    it patches `builtins.__import__` to raise if `mlflow` is ever actually
+    imported, proving the lazy-import contract (only import the real package
+    when no `tracker` override is given) actually holds, which is a claim a
+    normal assertion can't easily verify.
+
+tests/test_anthropic_smoke.py
+    The one test in this repo that's allowed to hit a real, paid API --
+    guarded behind two separate opt-ins (`RUN_LLM_SMOKE_TEST=1` env var AND
+    a real `ANTHROPIC_API_KEY` configured) so it never runs by accident in
+    CI or on a normal `pytest` invocation. Exists purely to prove the
+    Anthropic client wiring in src/llm/clients.py actually works against the
+    real API when you deliberately want that checked, separate from all the
+    fake-generator-based tests that never leave your machine.
+
+================================================================================
+DATA / OUTPUT / CONFIG DIRECTORIES (mostly gitignored)
+================================================================================
+templates/
+    Where your real LaTeX CV template (`cv_template.tex`) is meant to live
+    once you set it up, per CLAUDE.md's "LaTeX CV Strategy". Gitignored
+    (`templates/*.tex` in .gitignore) because it's your personal resume
+    content, not project source code -- only a `.gitkeep` placeholder is
+    committed so the empty folder still exists after a fresh clone.
+
+data/resumes/
+    Where `api/routers/documents.py`'s `_save_upload` writes uploaded resume
+    PDFs, named with a `uuid4` prefix to avoid collisions. Gitignored for the
+    same reason as templates/ -- it's private career data, not code.
+
+outputs/generated/
+    Where `src/llm/cv_tailoring.py`'s `compile_latex` writes both the
+    tailored `.tex` source and the compiled PDF for each generation attempt.
+    Gitignored, same reasoning.
+
+mlruns/
+    MLflow's own local tracking-data directory (runs, params, artifacts),
+    written to whenever `src/tracking/mlflow_tracker.py`'s `log_generation_
+    run` actually executes against the real mlflow package. Currently near-
+    empty since nothing in src/llm/*.py calls it yet. Shared between the
+    `jam` and `mlflow` services in docker-compose.yml via a bind-mounted
+    volume, which is how the MLflow UI container can see runs logged by the
+    app container.
+
+================================================================================
+ROOT-LEVEL FILES
+================================================================================
+CLAUDE.md
+    The project's design manifest and single source of truth -- every
+    architectural decision, the full database schema, the full endpoint
+    list, the model-routing table, and the phase plan live here. It's meant
+    to be read fresh at the start of every work session rather than trusted
+    from memory, specifically because (as this session proved firsthand) it
+    can and does get revised as real requirements surface -- e.g. the entire
+    "applications = actual submission, not intent" rule this file's database
+    section now documents didn't exist in the original manifest; it was
+    added mid-project once the original "any resume+job pair counts as an
+    application" design was recognized as wrong.
+
+requirements.txt
+    Every pinned third-party Python package the project depends on, grouped
+    by purpose (web framework, database, document processing, LLM clients,
+    experiment tracking, testing, linting) with exact `==` versions --
+    exact pins specifically so `pip install -r requirements.txt` produces
+    the same environment on any machine (yours, CI once Phase 6 exists, or
+    inside the Docker image) rather than silently drifting to whatever the
+    latest release happens to be on install day.
+
+Dockerfile
+    Defines the `jam` app's container image: start from `python:3.11-slim`,
+    install requirements.txt, copy the repo in, expose port 8000, run
+    uvicorn against `api.main:app`. Deliberately does NOT yet install the
+    `tectonic` binary (a real, currently-open gap -- CV tailoring's compile
+    step would fail with "command not found" inside this container today;
+    fixing it is scoped to Phase 8).
+
+docker-compose.yml
+    Defines two services that run together locally: `jam` (this app, built
+    from the Dockerfile above, with jam.db/templates/outputs/data/mlruns all
+    bind-mounted so they persist and are editable outside the container) and
+    `mlflow` (the official MLflow server image, serving the UI at
+    localhost:5001, sharing the same `mlruns/` volume so it can see what the
+    `jam` service logs).
+
+.env / .env.example
+    `.env` holds real secrets (API keys) and machine-specific config,
+    gitignored so it's never committed. `.env.example` is the checked-in
+    template showing every variable name and a safe placeholder/default
+    value, so a fresh clone tells you exactly what to fill in. A real lesson
+    from this session: these two files can drift from each other (and from
+    what the code's own hardcoded fallback defaults assume) without any
+    error ever surfacing, since a hardcoded default just silently masks the
+    mismatch -- worth periodically diffing them against each other and
+    against src/llm/clients.py's `os.getenv(..., "fallback")` calls.
+
+.gitignore
+    Keeps four categories of thing out of version control: environment/
+    secrets (.env), local tooling artifacts (venv/, __pycache__/, .pytest_
+    cache/), the real database file (jam.db), and private user data
+    (templates/*.tex, data/resumes/*, outputs/generated/*, mlruns/*) --
+    each of the last category paired with a `!path/.gitkeep` exception so
+    the empty folder structure itself still gets committed even though its
+    contents never do.
+
+.github/copilot-instructions.md
+    GitHub Copilot's equivalent of CLAUDE.md -- editor-tooling
+    configuration, not application code. Worth knowing it exists because, as
+    of this session, it still has a stale copy of the *old* database schema
+    (pre-dating the applications/generated_documents revision) that was
+    flagged but deliberately not updated, since it was out of the scope that
+    was actually asked for.
+
+.claude/skills/
+    Custom Claude Code skills installed for this project (model-routing-
+    drift-check, schema-integrity-check, silent-side-effect-review, tool-
+    contract-audit) -- development tooling invoked during Claude Code
+    sessions working on this repo, not part of the running application.
+
+================================================================================
+HOW A REQUEST ACTUALLY FLOWS THROUGH THIS (worked example)
+================================================================================
+POST /applications  { resume_id, job_id, submission_method: "manual" }
+  1. api/routers/applications.py's `create_application` handler receives it,
+     FastAPI having already validated it against the `ApplicationCreate`
+     Pydantic model (rejecting a malformed request with a 422 before this
+     code even runs).
+  2. It calls `crud.get_resume`/`crud.get_job_description` (src/database/
+     crud.py) to confirm both ids are real, raising a 404 via HTTPException
+     if not.
+  3. It calls `crud.create_application(...)`, which internally: looks up the
+     latest `doc_type="score"` GeneratedDocument for this (resume_id, job_id)
+     pair to snapshot a match_score, flushes the new Application row to get
+     its id, finds any still-unlinked prep documents for that same pair and
+     points their `application_id` at the new row, then commits.
+  4. Every one of those reads/writes goes through the request-scoped
+     `Session` that FastAPI created via `Depends(get_db)` (src/database/
+     connection.py), against whichever physical database `connection.engine`
+     currently points at.
+  5. The handler passes the resulting `Application` ORM object through
+     `_serialize_application` to shape it into the JSON dict actually
+     returned to the caller.
+
+Nowhere in that flow does api/ touch SQLAlchemy directly, and nowhere in
+src/database/ does anything know FastAPI exists -- which is the whole point
+of the split.
