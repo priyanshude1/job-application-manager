@@ -72,14 +72,21 @@ class GeneratedDocument(Base):
     __tablename__ = "generated_documents"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"))
+    application_id: Mapped[int | None] = mapped_column(
+        ForeignKey("applications.id"), nullable=True
+    )
+    resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id"))
+    job_id: Mapped[int] = mapped_column(ForeignKey("job_descriptions.id"))
     doc_type: Mapped[str] = mapped_column(String)
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     file_path: Mapped[str | None] = mapped_column(String, nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
-    application: Mapped["Application"] = relationship(back_populates="documents")
+    application: Mapped["Application | None"] = relationship(back_populates="documents")
+    resume: Mapped["Resume"] = relationship(back_populates="documents")
+    job: Mapped["JobDescription"] = relationship(back_populates="documents")
 
 
 class EmailEvent(Base):
