@@ -6,6 +6,7 @@ from typing import Literal
 from sqlalchemy.orm import Session
 
 from src.database import crud
+from src.document_processing.jd_parser import parse_job_description
 from src.llm.cover_letter import generate_and_compile_cover_letter
 from src.llm.cv_tailoring import tailor_and_compile_cv
 from src.llm.scoring import score_match
@@ -46,6 +47,70 @@ def _document(document) -> dict:
 
 def _basename(prefix: str, resume_id: int, job_id: int) -> str:
     return f"{prefix}_{resume_id}_{job_id}_{uuid.uuid4().hex[:8]}"
+
+
+def create_job_description_tool(
+    db: Session,
+    company: str,
+    role: str,
+    raw_text: str,
+    url: str | None = None,
+) -> dict:
+    """Save a pasted job description so later agent tools can use its ID."""
+    company = company.strip()
+    role = role.strip()
+    raw_text = parse_job_description(raw_text=raw_text)
+    if not company or not role:
+        return {"success": False, "error": "Company and role are required"}
+    if not raw_text:
+        return {"success": False, "error": "Job description text is required"}
+
+    job = crud.create_job_description(
+        db,
+        company=company,
+        role=role,
+        raw_text=raw_text,
+        url=url,
+    )
+    return {
+        "success": True,
+        "job": {
+            "id": job.id,
+            "company": job.company,
+            "role": job.role,
+            "url": job.url,
+        },
+    }
+
+
+def find_job_descriptions_tool(
+    db: Session,
+    company: str | None = None,
+    role: str | None = None,
+) -> dict:
+    """Find saved job descriptions using case-insensitive company/role matching."""
+    company_query = company.strip().lower() if company else None
+    role_query = role.strip().lower() if role else None
+    if not company_query and not role_query:
+        return {"success": False, "error": "Company or role is required"}
+
+    matches = []
+    for job in crud.list_job_descriptions(db):
+        if company_query and company_query not in job.company.lower():
+            continue
+        if role_query and role_query not in job.role.lower():
+            continue
+        matches.append(
+            {
+                "id": job.id,
+                "company": job.company,
+                "role": job.role,
+                "url": job.url,
+                "upload_date": job.upload_date,
+            }
+        )
+
+    return {"success": True, "matches": matches, "count": len(matches)}
 
 
 def generate_cover_letter_tool(db: Session, resume_id: int, job_id: int) -> dict:
