@@ -1,4 +1,5 @@
 from src.llm.cover_letter import (
+    COVER_LETTER_SYSTEM_PROMPT,
     generate_and_compile_cover_letter,
     generate_cover_letter,
 )
@@ -25,8 +26,12 @@ def test_generate_cover_letter_uses_resume_and_job_context():
     assert "Python engineer with SQL experience." in captured["prompt"]
     assert "Looking for a backend engineer with Python." in captured["prompt"]
     assert "Backend Engineer" in captured["prompt"]
+    assert "300-400 words" in captured["kwargs"]["system"]
+    assert "3 or 4 focused paragraphs" in captured["kwargs"]["system"]
+    assert "passionate about" in captured["kwargs"]["system"]
+    assert captured["kwargs"]["system"] == COVER_LETTER_SYSTEM_PROMPT
     assert captured["kwargs"] == {
-        "system": "You are a meticulous LaTeX editor writing truthful cover letters. Output only valid .tex source.",
+        "system": COVER_LETTER_SYSTEM_PROMPT,
         "max_tokens": 2400,
     }
 
