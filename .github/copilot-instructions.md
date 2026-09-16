@@ -171,7 +171,7 @@ The main tables and important fields are:
 - `generated_documents`: `id`, `application_id`, `doc_type`, `content_text`, `file_path`, `prompt_version`, `created_at`.
 - `email_events`: `id`, optional `application_id`, `received_at`, `subject`, `snippet`, `detected_intent`, optional `status_change`, and `raw_email_id`.
 
-Application statuses are `Applied`, `Interview Scheduled`, `Interview Done`, `Offer`, `Rejected`, and `Ghosted`. Match scores range from 0.0 to 1.0. Generated document types include `cover_letter`, `cv_latex`, `cv_pdf`, and `tailoring_suggestions`.
+Application statuses are `Applied`, `Interview Scheduled`, `Interview Done`, `Offer`, `Rejected`, and `Ghosted`. Match scores range from 0.0 to 1.0. Generated document types include `cover_letter_latex`, `cover_letter_pdf`, `cv_latex`, `cv_pdf`, and `score`.
 
 Use CRUD functions in `src/database/crud.py` for persistence. Keep database access out of presentation code when an existing service or CRUD boundary can own it. Account for SQLite's single-user and limited-concurrency nature.
 

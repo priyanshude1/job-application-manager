@@ -190,7 +190,7 @@ generated_documents
                     pair is actually submitted; NULL while still a pre-submission prep artifact)
     resume_id       INTEGER FK → resumes.id
     job_id          INTEGER FK → job_descriptions.id
-    doc_type        TEXT  -- cover_letter|cv_latex|cv_pdf|score
+    doc_type        TEXT  -- cover_letter_latex|cover_letter_pdf|cv_latex|cv_pdf|score
     content_text    TEXT  -- raw text, LaTeX source, or (doc_type='score') gap-analysis text
     match_score     REAL  -- nullable; 0.0 to 1.0, only for doc_type='score' rows — produced
                     together with content_text's gap analysis by one score_match() call
