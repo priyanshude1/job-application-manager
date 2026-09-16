@@ -1,4 +1,11 @@
-from typing import TypedDict
+from typing import Any, TypedDict
+
+
+class ToolCall(TypedDict):
+    """One routing decision: which tool to run this turn, and with what arguments."""
+
+    name: str
+    args: dict[str, Any]
 
 
 class AgentState(TypedDict):
@@ -9,3 +16,4 @@ class AgentState(TypedDict):
     tool_results: list[dict]
     final_response: str
     error: str | None
+    tool_call: ToolCall | None

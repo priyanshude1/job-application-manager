@@ -38,6 +38,44 @@ def generate_with_anthropic(
     return response.content[0].text
 
 
+def generate_with_anthropic_tools(
+    messages: list[dict],
+    *,
+    tools: list[dict],
+    system: str,
+    model: str | None = None,
+    max_tokens: int = 1024,
+    client: Any | None = None,
+) -> dict[str, Any]:
+    """Send a message history to Claude with tool-calling enabled.
+
+    Unlike generate_with_anthropic (one prompt string in, plain text out),
+    a tool-calling caller needs the full recent conversation and needs to
+    know whether the model chose to call a tool or just reply in text -- so
+    this takes a real `messages` list and returns a normalized
+    {"tool_call": {"name", "args"} | None, "text": str | None} shape instead
+    of a bare string. Parsing the Anthropic SDK's response.content blocks
+    happens here, and only here, so callers (e.g. the agent's router node)
+    never need to know that structure exists. Defaults to SONNET_MODEL, not
+    HAIKU_MODEL -- per CLAUDE.md's model routing table, agent reasoning needs
+    Sonnet's larger context window, unlike the single-shot document tasks
+    generate_with_anthropic serves.
+    """
+    active_client = client or get_anthropic_client()
+    response = active_client.messages.create(
+        model=model or get_sonnet_model(),
+        max_tokens=max_tokens,
+        system=system,
+        tools=tools,
+        messages=messages,
+    )
+    tool_use = next((block for block in response.content if block.type == "tool_use"), None)
+    if tool_use is not None:
+        return {"tool_call": {"name": tool_use.name, "args": tool_use.input}, "text": None}
+    text = "".join(block.text for block in response.content if block.type == "text")
+    return {"tool_call": None, "text": text}
+
+
 def get_openrouter_client() -> Any:
     """Create the OpenRouter client when an email-classification feature needs it."""
     from openai import OpenAI
