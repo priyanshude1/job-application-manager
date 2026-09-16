@@ -52,8 +52,15 @@ def response_node(state: AgentState) -> dict[str, Any]:
 
 
 def memory_update_node(state: AgentState) -> dict[str, Any]:
-    """Keep only the configured number of recent conversation messages."""
-    return {"messages": state["messages"][-MEMORY_WINDOW_SIZE:]}
+    """Record this turn's reply in history, then keep only the recent window.
+
+    response_node always runs immediately before this node in the graph, so
+    state["final_response"] is guaranteed to be populated here. Without this
+    append, the agent's own replies would never re-enter `messages`, so the
+    next turn's LLM call would have no idea what it said last time.
+    """
+    messages = [*state["messages"], {"role": "assistant", "content": state["final_response"]}]
+    return {"messages": messages[-MEMORY_WINDOW_SIZE:]}
 
 
 def _truncate_result(result: dict[str, Any]) -> dict[str, Any]:
