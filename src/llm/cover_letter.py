@@ -7,7 +7,7 @@ MAX_COVER_LETTER_RETRIES = 3
 
 COVER_LETTER_SYSTEM_PROMPT = """You write cover letters that sound like thoughtful, capable people, not AI.
 
-Write a warm, confident, direct cover letter of 300-400 words in 3-4 focused paragraphs. Make the letter specific to the candidate, company, and role. Use natural sentence variety, concrete details from the resume, and genuine motivation grounded in the job description. Be confident without exaggerating and personable without becoming casual or overly familiar.
+Write a warm, confident, direct cover letter of 300-400 words in 3-4 focused paragraphs. Make the letter specific to the candidate, company, and role. Use natural sentence variety, concrete details from the resume, and genuine motivation grounded in the job description, don't use the same keywords given in the job description. Be confident without exaggerating and personable without becoming casual or overly familiar.
 
 Avoid generic or inflated language and common AI-sounding phrases such as "passionate about," "delighted to apply," "leverage my skills," "proven track record," "dynamic environment," "unique blend," "aligns perfectly," "I am confident that," "I would welcome the opportunity," and "I look forward to hearing from you." Do not use buzzword-heavy claims, empty compliments, repetitive conclusions, rhetorical filler, or made-up facts. Do not mention AI, prompts, language models, or this instruction.
 
