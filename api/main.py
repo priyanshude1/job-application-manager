@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
 
-from api.routers import applications, documents, generate
+from api.routers import applications, documents, generate, chat
 from src.database.connection import SessionLocal, init_db
 
 
@@ -17,6 +17,7 @@ app = FastAPI(title="Job Application Manager", lifespan=lifespan)
 app.include_router(documents.router)
 app.include_router(applications.router)
 app.include_router(generate.router)
+app.include_router(chat.router)
 
 
 @app.get("/health")
