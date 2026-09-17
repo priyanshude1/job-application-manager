@@ -1,3 +1,4 @@
+import json
 import os
 from collections.abc import Callable
 from typing import Any
@@ -9,6 +10,7 @@ from src.llm.clients import generate_with_anthropic_tools
 
 MEMORY_WINDOW_SIZE = int(os.getenv("MEMORY_WINDOW_SIZE", "8"))
 TOOL_RESULT_MAX_TOKENS = int(os.getenv("TOOL_RESULT_MAX_TOKENS", "1000"))
+MAX_AGENT_ITERATIONS = 3
 ToolExecutor = Callable[[AgentState], dict[str, Any]]
 
 _STATUS_ENUM = [
@@ -188,6 +190,7 @@ def parse_intent_node(state: AgentState) -> dict[str, Any]:
         "final_response": "",
         "error": None,
         "tool_call": None,
+        "tool_call_count": 0,
     }
 
 
@@ -218,7 +221,10 @@ def make_router_node(*, client: Any | None = None) -> Callable[[AgentState], dic
                 "tool_call": None,
                 "final_response": result["text"] or "I'm not sure how to help with that.",
             }
-        return {"tool_call": result["tool_call"]}
+        return {
+            "tool_call": result["tool_call"],
+            "messages": [*state["messages"], result["assistant_message"]],
+        }
 
     return router_node
 
@@ -259,7 +265,23 @@ def make_tool_node(executor: ToolExecutor) -> Callable[[AgentState], dict[str, A
             result = executor(state)
         except Exception as exc:
             return {"error": str(exc)}
-        return {"tool_results": [*state["tool_results"], _truncate_result(result)]}
+        tool_call = state["tool_call"]
+        observed_result = _truncate_result(result)
+        tool_result_message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_call["id"],
+                    "content": json.dumps(observed_result, default=str),
+                }
+            ],
+        }
+        return {
+            "tool_results": [*state["tool_results"], observed_result],
+            "messages": [*state["messages"], tool_result_message],
+            "tool_call_count": state["tool_call_count"] + 1,
+        }
 
     return tool_node
 
