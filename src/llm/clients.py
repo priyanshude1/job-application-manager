@@ -71,9 +71,31 @@ def generate_with_anthropic_tools(
     )
     tool_use = next((block for block in response.content if block.type == "tool_use"), None)
     if tool_use is not None:
-        return {"tool_call": {"name": tool_use.name, "args": tool_use.input}, "text": None}
+        return {
+            "tool_call": {
+                "id": tool_use.id,
+                "name": tool_use.name,
+                "args": tool_use.input,
+            },
+            "assistant_message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": tool_use.id,
+                        "name": tool_use.name,
+                        "input": tool_use.input,
+                    }
+                ],
+            },
+            "text": None,
+        }
     text = "".join(block.text for block in response.content if block.type == "text")
-    return {"tool_call": None, "text": text}
+    return {
+        "tool_call": None,
+        "assistant_message": {"role": "assistant", "content": text},
+        "text": text,
+    }
 
 
 def get_openrouter_client() -> Any:
