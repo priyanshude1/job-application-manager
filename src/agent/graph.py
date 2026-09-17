@@ -32,6 +32,13 @@ def _route_after_router(state: AgentState) -> str:
     return "direct_reply"
 
 
+def _route_after_tool(state: AgentState) -> str:
+    """Loop for another model decision until the three-tool limit is reached."""
+    if state["error"] or state["tool_call_count"] >= 3:
+        return "response"
+    return "router"
+
+
 def build_graph(
     *,
     router_node: Any | None = None,
@@ -65,7 +72,11 @@ def build_graph(
         _route_after_router,
         {"error": "response", "tool": "run_tool", "direct_reply": "memory_update"},
     )
-    graph.add_edge("run_tool", "response")
+    graph.add_conditional_edges(
+        "run_tool",
+        _route_after_tool,
+        {"router": "router", "response": "response"},
+    )
     graph.add_edge("response", "memory_update")
     graph.add_edge("memory_update", END)
 
