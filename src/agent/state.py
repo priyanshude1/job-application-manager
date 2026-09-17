@@ -4,6 +4,7 @@ from typing import Any, TypedDict
 class ToolCall(TypedDict):
     """One routing decision: which tool to run this turn, and with what arguments."""
 
+    id: str
     name: str
     args: dict[str, Any]
 
@@ -17,3 +18,4 @@ class AgentState(TypedDict):
     final_response: str
     error: str | None
     tool_call: ToolCall | None
+    tool_call_count: int
