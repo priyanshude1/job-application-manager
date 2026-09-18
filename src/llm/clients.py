@@ -1,6 +1,8 @@
 import os
 from typing import Any
 
+from src.tracking.langsmith_tracker import trace_llm_call
+
 
 def get_anthropic_client() -> Any:
     """Create the Anthropic client when an LLM feature actually needs it."""
@@ -20,6 +22,7 @@ def get_sonnet_model() -> str:
     return os.getenv("SONNET_MODEL", "claude-sonnet-5")
 
 
+@trace_llm_call("anthropic.generate")
 def generate_with_anthropic(
     prompt: str,
     *,
@@ -38,6 +41,7 @@ def generate_with_anthropic(
     return response.content[0].text
 
 
+@trace_llm_call("anthropic.tools")
 def generate_with_anthropic_tools(
     messages: list[dict],
     *,
@@ -115,6 +119,7 @@ def get_openrouter_model() -> str:
     return os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.2-3b-instruct:free")
 
 
+@trace_llm_call("openrouter.generate")
 def generate_with_openrouter(
     prompt: str,
     *,
