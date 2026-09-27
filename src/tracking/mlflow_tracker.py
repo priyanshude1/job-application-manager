@@ -31,6 +31,16 @@ def log_generation_run(
     directory.
     """
     if tracker is None:
+        # MLflow's own defaults (7 retries, exponential backoff, 120s/request)
+        # are tuned for tolerating a rate-limited *remote* server -- wrong for
+        # this project, where "the local MLflow container isn't running" is the
+        # common case, not a transient blip. Without this, a single failed
+        # call can block for minutes before log_generation_run_safe's
+        # try/except ever gets a chance to catch anything. setdefault() so a
+        # deployment that genuinely wants MLflow's resilient retries can still
+        # override these via its own environment.
+        os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "0")
+        os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "2")
         import mlflow as tracker
 
     tracker.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001"))
@@ -51,3 +61,34 @@ def log_generation_run(
             tracker.log_metric(key, value)
 
         return run.info.run_id
+
+
+def log_generation_run_safe(
+    *,
+    run_name: str,
+    resume_id: int,
+    job_id: int,
+    output_text: str,
+    prompt_template_version: str = "v1",
+) -> str | None:
+    """Best-effort wrapper around log_generation_run: returns the run id, or
+    None if MLflow itself is unreachable/misconfigured.
+
+    MLflow is optional local infrastructure -- a generated document must stay
+    usable even if the tracking server is down, so failures here are
+    swallowed rather than propagated. This is the single place both
+    api/routers/generate.py and src/agent/tools.py call, so a document
+    created via the direct API and one created via the chat agent get the
+    same MLflow lineage instead of silently diverging.
+    """
+    try:
+        return log_generation_run(
+            run_name=run_name,
+            prompt_template_version=prompt_template_version,
+            job_id=job_id,
+            resume_id=resume_id,
+            prompt_used=f"{run_name} for resume_id={resume_id}, job_id={job_id}",
+            output_text=output_text,
+        )
+    except Exception:
+        return None

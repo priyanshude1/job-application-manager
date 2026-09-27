@@ -10,6 +10,7 @@ from src.document_processing.jd_parser import parse_job_description
 from src.llm.cover_letter import generate_and_compile_cover_letter
 from src.llm.cv_tailoring import tailor_and_compile_cv
 from src.llm.scoring import score_match
+from src.tracking.mlflow_tracker import log_generation_run_safe
 
 OUTPUTS_DIR = Path(os.getenv("OUTPUTS_DIR", "./outputs")) / "generated"
 ApplicationStatus = Literal[
@@ -128,12 +129,19 @@ def generate_cover_letter_tool(db: Session, resume_id: int, job_id: int) -> dict
     if not result["success"]:
         return {"success": False, "error": result["error"] or "Cover letter compilation failed"}
 
+    prompt_version = log_generation_run_safe(
+        run_name="cover_letter",
+        resume_id=resume_id,
+        job_id=job_id,
+        output_text=result["latex_source"],
+    )
     latex = crud.create_generated_document(
         db,
         resume_id=resume_id,
         job_id=job_id,
         doc_type="cover_letter_latex",
         content_text=result["latex_source"],
+        prompt_version=prompt_version,
     )
     pdf = crud.create_generated_document(
         db,
@@ -141,6 +149,7 @@ def generate_cover_letter_tool(db: Session, resume_id: int, job_id: int) -> dict
         job_id=job_id,
         doc_type="cover_letter_pdf",
         file_path=result["pdf_path"],
+        prompt_version=prompt_version,
     )
     return {"success": True, "attempts": result["attempts"], "documents": [_document(latex), _document(pdf)]}
 
@@ -163,12 +172,19 @@ def tailor_cv_tool(db: Session, resume_id: int, job_id: int) -> dict:
     if not result["success"]:
         return {"success": False, "error": result["error"] or "CV compilation failed"}
 
+    prompt_version = log_generation_run_safe(
+        run_name="cv_tailoring",
+        resume_id=resume_id,
+        job_id=job_id,
+        output_text=result["latex_source"],
+    )
     latex = crud.create_generated_document(
         db,
         resume_id=resume_id,
         job_id=job_id,
         doc_type="cv_latex",
         content_text=result["latex_source"],
+        prompt_version=prompt_version,
     )
     pdf = crud.create_generated_document(
         db,
@@ -176,6 +192,7 @@ def tailor_cv_tool(db: Session, resume_id: int, job_id: int) -> dict:
         job_id=job_id,
         doc_type="cv_pdf",
         file_path=result["pdf_path"],
+        prompt_version=prompt_version,
     )
     return {"success": True, "attempts": result["attempts"], "documents": [_document(latex), _document(pdf)]}
 
@@ -185,6 +202,12 @@ def score_match_tool(db: Session, resume_id: int, job_id: int) -> dict:
     if error:
         return error
     result = score_match(resume.parsed_text, job.raw_text)
+    prompt_version = log_generation_run_safe(
+        run_name="score_match",
+        resume_id=resume_id,
+        job_id=job_id,
+        output_text=result["gap_analysis"],
+    )
     document = crud.create_generated_document(
         db,
         resume_id=resume_id,
@@ -192,6 +215,7 @@ def score_match_tool(db: Session, resume_id: int, job_id: int) -> dict:
         doc_type="score",
         content_text=result["gap_analysis"],
         match_score=result["match_score"],
+        prompt_version=prompt_version,
     )
     return {
         "success": True,

@@ -11,7 +11,7 @@ from src.database.connection import get_db
 from src.llm.cover_letter import generate_and_compile_cover_letter
 from src.llm.cv_tailoring import tailor_and_compile_cv
 from src.llm.scoring import score_match
-from src.tracking.mlflow_tracker import log_generation_run
+from src.tracking.mlflow_tracker import log_generation_run_safe
 
 router = APIRouter(prefix="/generate", tags=["generation"])
 OUTPUTS_DIR = Path(os.getenv("OUTPUTS_DIR", "./outputs")) / "generated"
@@ -60,18 +60,12 @@ def _log_generation(
     payload: GenerationRequest,
     output_text: str,
 ) -> str | None:
-    try:
-        return log_generation_run(
-            run_name=run_name,
-            prompt_template_version="v1",
-            job_id=payload.job_id,
-            resume_id=payload.resume_id,
-            prompt_used=f"{run_name} for resume_id={payload.resume_id}, job_id={payload.job_id}",
-            output_text=output_text,
-        )
-    except Exception:
-        # MLflow is optional for local generation; the document remains usable.
-        return None
+    return log_generation_run_safe(
+        run_name=run_name,
+        resume_id=payload.resume_id,
+        job_id=payload.job_id,
+        output_text=output_text,
+    )
 
 
 @router.post("/cover-letter", status_code=201)
