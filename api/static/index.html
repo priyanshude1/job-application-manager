@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>JAM · Job Application Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+        colors: {
+          brand: {
+            50: '#f5f3ff', 100: '#ede9fe', 200: '#ddd6fe', 300: '#c4b5fd',
+            400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed', 700: '#6d28d9',
+            800: '#5b21b6', 900: '#4c1d95',
+          },
+        },
+        boxShadow: {
+          card: '0 1px 2px 0 rgba(24,24,27,0.04), 0 1px 3px 1px rgba(24,24,27,0.06)',
+          panel: '-8px 0 24px -4px rgba(24,24,27,0.12)',
+          pop: '0 8px 24px -4px rgba(24,24,27,0.18)',
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { background: #f7f6f3; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+  .anim-fade { animation: fade-in .18s ease-out; }
+  .anim-slide { animation: slide-in .22s cubic-bezier(0.16,1,0.3,1); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { animation: spin .7s linear infinite; }
+  details > summary { cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  .latex-pre { white-space: pre-wrap; word-break: break-word; }
+</style>
+</head>
+<body class="text-zinc-800 antialiased min-h-screen font-sans">
+  <div id="app"></div>
+
+  <script>
+  // ---------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------
+  const state = {
+    view: 'applications',
+    health: null,
+    applications: [],
+    resumes: [],
+    jobs: [],
+    filters: { status: '', company: '', minScore: '' },
+    syncDays: 30,
+    detail: null,          // { application, emails, notesDraft }
+    prepare: {
+      resumeId: null, jobId: null, documents: [],
+      showNewResume: false, showNewJob: false,
+      newJob: { company: '', role: '', raw_text: '', url: '' },
+      submitForm: null,     // { submitted_at, submission_method } when open
+      busy: {},
+    },
+    chat: {
+      open: false,
+      sessionId: localStorage.getItem('jam_chat_session') || null,
+      messages: [],
+      draft: '',
+      busy: false,
+    },
+    toast: null,
+    confirmDialog: null,   // { title, message, confirmLabel, danger, onConfirm }
+    loading: { applications: false, sync: false },
+  };
+
+  const STATUS_STYLES = {
+    'Applied': 'bg-amber-100 text-amber-800 ring-amber-600/20',
+    'Interview Scheduled': 'bg-blue-100 text-blue-800 ring-blue-600/20',
+    'Interview Done': 'bg-violet-100 text-violet-800 ring-violet-600/20',
+    'Offer': 'bg-emerald-100 text-emerald-800 ring-emerald-600/20',
+    'Rejected': 'bg-rose-100 text-rose-800 ring-rose-600/20',
+    'Ghosted': 'bg-zinc-200 text-zinc-600 ring-zinc-600/10',
+  };
+  const STATUS_OPTIONS = ['Applied', 'Interview Scheduled', 'Interview Done', 'Offer', 'Rejected', 'Ghosted'];
+  const DOC_LABELS = {
+    score: 'Match Score', cv_latex: 'Tailored CV (LaTeX)', cv_pdf: 'Tailored CV (PDF)',
+    cover_letter_latex: 'Cover Letter (LaTeX)', cover_letter_pdf: 'Cover Letter (PDF)',
+  };
+  const INTENT_STYLES = {
+    interview_invite: 'bg-blue-100 text-blue-700', rejection: 'bg-rose-100 text-rose-700',
+    offer: 'bg-emerald-100 text-emerald-700', follow_up: 'bg-amber-100 text-amber-700',
+    submission_confirmation: 'bg-violet-100 text-violet-700', unknown: 'bg-zinc-100 text-zinc-500',
+  };
+
+  // ---------------------------------------------------------------------
+  // API helper
+  // ---------------------------------------------------------------------
+  async function api(method, path, body) {
+    const opts = { method, headers: {} };
+    if (body !== undefined) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch(path, opts);
+    const raw = await res.text();
+    const data = raw ? JSON.parse(raw) : null;
+    if (!res.ok) {
+      const detail = (data && data.detail) || res.statusText || 'Request failed';
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+    return data;
+  }
+
+  function esc(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z');
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+  function fmtDateTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z');
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+  function todayInputValue() {
+    return new Date().toISOString().slice(0, 10);
+  }
+  function fileUrl(filePath) {
+    if (!filePath) return null;
+    const normalized = filePath.replace(/\\/g, '/');
+    return normalized.startsWith('/') ? normalized : '/' + normalized;
+  }
+  function jobFor(jobId) { return state.jobs.find(j => j.id === jobId) || null; }
+  function resumeFor(resumeId) { return state.resumes.find(r => r.id === resumeId) || null; }
+
+  function showToast(message, kind = 'success') {
+    state.toast = { message, kind, id: Date.now() };
+    render();
+    const myId = state.toast.id;
+    setTimeout(() => { if (state.toast && state.toast.id === myId) { state.toast = null; render(); } }, 3200);
+  }
+
+  function askConfirm(opts) {
+    state.confirmDialog = opts;
+    render();
+  }
+
+  // ---------------------------------------------------------------------
+  // Data loading
+  // ---------------------------------------------------------------------
+  async function loadHealth() {
+    try { state.health = await api('GET', '/health'); } catch (e) { state.health = { status: 'error' }; }
+  }
+
+  async function loadResumesAndJobs() {
+    const [resumes, jobs] = await Promise.all([api('GET', '/resumes'), api('GET', '/jobs')]);
+    state.resumes = resumes;
+    state.jobs = jobs;
+  }
+
+  async function loadApplications() {
+    state.loading.applications = true; render();
+    try {
+      const params = new URLSearchParams();
+      if (state.filters.status) params.set('status', state.filters.status);
+      if (state.filters.company) params.set('company', state.filters.company);
+      if (state.filters.minScore) params.set('min_score', String(Number(state.filters.minScore) / 100));
+      state.applications = await api('GET', '/applications' + (params.toString() ? '?' + params : ''));
+    } catch (e) {
+      showToast('Could not load applications: ' + e.message, 'error');
+    } finally {
+      state.loading.applications = false; render();
+    }
+  }
+
+  async function openApplication(id) {
+    try {
+      const [application, emailData] = await Promise.all([
+        api('GET', '/applications/' + id),
+        api('GET', '/emails/' + id).catch(() => ({ events: [] })),
+      ]);
+      state.detail = { application, emails: emailData.events || [], notesDraft: application.notes || '' };
+      render();
+    } catch (e) {
+      showToast('Could not open application: ' + e.message, 'error');
+    }
+  }
+
+  function closeDetail() { state.detail = null; render(); }
+
+  async function patchApplication(id, payload, successMsg) {
+    try {
+      const updated = await api('PATCH', '/applications/' + id, payload);
+      if (state.detail && state.detail.application.id === id) {
+        state.detail.application = updated;
+      }
+      const idx = state.applications.findIndex(a => a.id === id);
+      if (idx !== -1) state.applications[idx] = { ...state.applications[idx], ...updated };
+      if (successMsg) showToast(successMsg);
+      render();
+    } catch (e) {
+      showToast('Update failed: ' + e.message, 'error');
+    }
+  }
+
+  async function deleteApplication(id) {
+    try {
+      await api('DELETE', '/applications/' + id);
+      state.applications = state.applications.filter(a => a.id !== id);
+      state.detail = null;
+      showToast('Application deleted');
+      render();
+    } catch (e) {
+      showToast('Delete failed: ' + e.message, 'error');
+    }
+  }
+
+  async function syncGmail(days) {
+    state.loading.sync = true; render();
+    try {
+      const result = await api('POST', '/emails/sync?days=' + encodeURIComponent(days));
+      showToast(`Gmail sync complete — ${result.processed} email(s) processed` + (result.errors.length ? `, ${result.errors.length} company error(s)` : ''));
+      await loadApplications();
+      if (state.detail) await openApplication(state.detail.application.id);
+    } catch (e) {
+      showToast('Gmail sync failed: ' + e.message, 'error');
+    } finally {
+      state.loading.sync = false; render();
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Prepare view actions
+  // ---------------------------------------------------------------------
+  async function loadPrepDocuments() {
+    const { resumeId, jobId } = state.prepare;
+    if (!resumeId || !jobId) { state.prepare.documents = []; return; }
+    try {
+      state.prepare.documents = await api('GET', `/generate/documents?resume_id=${resumeId}&job_id=${jobId}`);
+    } catch (e) {
+      state.prepare.documents = [];
+    }
+  }
+
+  async function selectPrepareResume(id) {
+    state.prepare.resumeId = id;
+    await loadPrepDocuments();
+    render();
+  }
+  async function selectPrepareJob(id) {
+    state.prepare.jobId = id;
+    await loadPrepDocuments();
+    render();
+  }
+
+  async function uploadResume(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/resume/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Upload failed');
+      state.resumes.unshift({ id: data.id, filename: data.filename, upload_date: new Date().toISOString() });
+      state.prepare.resumeId = data.id;
+      state.prepare.showNewResume = false;
+      showToast('Resume uploaded');
+      await loadPrepDocuments();
+      render();
+    } catch (e) {
+      showToast('Resume upload failed: ' + e.message, 'error');
+    }
+  }
+
+  async function saveNewJob() {
+    const { company, role, raw_text, url } = state.prepare.newJob;
+    if (!company.trim() || !role.trim() || !raw_text.trim()) {
+      showToast('Company, role, and job text are all required', 'error'); return;
+    }
+    try {
+      const job = await api('POST', '/jobs/paste', {
+        company: company.trim(), role: role.trim(), raw_text, url: url.trim() || null,
+      });
+      state.jobs.unshift({ id: job.id, company: job.company, role: job.role, upload_date: new Date().toISOString(), url: url || null });
+      state.prepare.jobId = job.id;
+      state.prepare.showNewJob = false;
+      state.prepare.newJob = { company: '', role: '', raw_text: '', url: '' };
+      showToast('Job description saved');
+      await loadPrepDocuments();
+      render();
+    } catch (e) {
+      showToast('Could not save job description: ' + e.message, 'error');
+    }
+  }
+
+  async function runGeneration(kind) {
+    const { resumeId, jobId } = state.prepare;
+    const endpoints = { score: '/generate/score', cv: '/generate/tailor-cv', cover: '/generate/cover-letter' };
+    state.prepare.busy[kind] = true; render();
+    try {
+      await api('POST', endpoints[kind], { resume_id: resumeId, job_id: jobId });
+      await loadPrepDocuments();
+      showToast('Generated successfully');
+    } catch (e) {
+      showToast('Generation failed: ' + e.message, 'error');
+    } finally {
+      state.prepare.busy[kind] = false; render();
+    }
+  }
+
+  async function submitApplication() {
+    const { resumeId, jobId, submitForm } = state.prepare;
+    try {
+      const application = await api('POST', '/applications', {
+        resume_id: resumeId, job_id: jobId,
+        submission_method: submitForm.submission_method,
+        submitted_at: submitForm.submitted_at ? submitForm.submitted_at + 'T00:00:00' : null,
+      });
+      showToast('Application created');
+      state.prepare = { resumeId: null, jobId: null, documents: [], showNewResume: false, showNewJob: false, newJob: { company: '', role: '', raw_text: '', url: '' }, submitForm: null, busy: {} };
+      state.view = 'applications';
+      await loadApplications();
+      await openApplication(application.id);
+    } catch (e) {
+      showToast('Could not create application: ' + e.message, 'error');
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Chat
+  // ---------------------------------------------------------------------
+  async function sendChatMessage() {
+    const text = state.chat.draft.trim();
+    if (!text || state.chat.busy) return;
+    state.chat.messages.push({ role: 'user', content: text });
+    state.chat.draft = '';
+    state.chat.busy = true;
+    render();
+    try {
+      const res = await api('POST', '/chat', { message: text, session_id: state.chat.sessionId });
+      state.chat.sessionId = res.session_id;
+      localStorage.setItem('jam_chat_session', res.session_id);
+      state.chat.messages.push({ role: 'assistant', content: res.response });
+    } catch (e) {
+      state.chat.messages.push({ role: 'assistant', content: '⚠️ ' + e.message });
+    } finally {
+      state.chat.busy = false;
+      render();
+      const box = document.getElementById('chat-scroll');
+      if (box) box.scrollTop = box.scrollHeight;
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Render: small building blocks
+  // ---------------------------------------------------------------------
+  function iconSpinner(extra = '') {
+    return `<svg class="spinner ${extra}" width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-opacity="0.25"/><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>`;
+  }
+
+  function scoreBadge(score) {
+    const pct = Math.round(score * 100);
+    const color = pct >= 70 ? 'text-emerald-700 bg-emerald-50 ring-emerald-600/20' : pct >= 40 ? 'text-amber-700 bg-amber-50 ring-amber-600/20' : 'text-rose-700 bg-rose-50 ring-rose-600/20';
+    return `<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${color}">${pct}% match</span>`;
+  }
+
+  function statusBadge(status) {
+    const cls = STATUS_STYLES[status] || 'bg-zinc-100 text-zinc-600 ring-zinc-600/10';
+    return `<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${cls}">${esc(status)}</span>`;
+  }
+
+  function toastHtml() {
+    if (!state.toast) return '';
+    const isError = state.toast.kind === 'error';
+    return `
+      <div class="fixed bottom-5 left-1/2 -translate-x-1/2 z-[100] anim-fade">
+        <div class="flex items-center gap-2 rounded-xl px-4 py-2.5 shadow-pop text-sm font-medium ${isError ? 'bg-rose-600 text-white' : 'bg-zinc-900 text-white'}">
+          ${esc(state.toast.message)}
+        </div>
+      </div>`;
+  }
+
+  function confirmDialogHtml() {
+    const c = state.confirmDialog;
+    if (!c) return '';
+    return `
+      <div class="fixed inset-0 z-[110] flex items-center justify-center bg-zinc-900/40 anim-fade" data-action="dismiss-confirm">
+        <div class="w-full max-w-sm rounded-2xl bg-white p-5 shadow-pop" data-stop>
+          <h3 class="text-base font-semibold text-zinc-900">${esc(c.title)}</h3>
+          <p class="mt-1.5 text-sm text-zinc-500">${esc(c.message)}</p>
+          <div class="mt-4 flex justify-end gap-2">
+            <button class="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100" data-action="dismiss-confirm">Cancel</button>
+            <button class="rounded-lg px-3 py-1.5 text-sm font-medium text-white ${c.danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-brand-600 hover:bg-brand-700'}" data-action="run-confirm">${esc(c.confirmLabel || 'Confirm')}</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // ---------------------------------------------------------------------
+  // Render: navbar
+  // ---------------------------------------------------------------------
+  function navbarHtml() {
+    const dot = state.health && state.health.status === 'ok' ? 'bg-emerald-500' : 'bg-rose-500';
+    return `
+      <header class="sticky top-0 z-30 border-b border-zinc-200/80 bg-[#f7f6f3]/90 backdrop-blur-sm">
+        <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
+          <div class="flex items-center gap-2.5">
+            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white font-bold text-sm">J</div>
+            <div>
+              <div class="text-sm font-bold leading-tight text-zinc-900">JAM</div>
+              <div class="text-[11px] leading-tight text-zinc-400">Job Application Manager</div>
+            </div>
+          </div>
+          <nav class="flex items-center gap-1 rounded-full bg-zinc-100 p-1">
+            ${tabButton('applications', 'Applications')}
+            ${tabButton('prepare', 'Prepare')}
+          </nav>
+          <div class="flex items-center gap-2 text-xs text-zinc-400" title="System health">
+            <span class="h-2 w-2 rounded-full ${dot}"></span>
+            <span class="hidden sm:inline">${state.health ? esc(state.health.status) : '…'}</span>
+          </div>
+        </div>
+      </header>`;
+  }
+  function tabButton(id, label) {
+    const active = state.view === id;
+    return `<button class="rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${active ? 'bg-white text-zinc-900 shadow-card' : 'text-zinc-500 hover:text-zinc-800'}" data-action="set-view" data-view="${id}">${label}</button>`;
+  }
+
+  // ---------------------------------------------------------------------
+  // Render: Applications view
+  // ---------------------------------------------------------------------
+  function applicationsViewHtml() {
+    const cards = state.applications.map(applicationCardHtml).join('');
+    const empty = `
+      <div class="col-span-full flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-300 bg-white/50 py-16 text-center">
+        <div class="text-3xl">📭</div>
+        <p class="mt-3 text-sm font-medium text-zinc-600">No applications yet</p>
+        <p class="mt-1 text-sm text-zinc-400">Prepare a resume + job description, generate your documents, then mark it as submitted.</p>
+        <button class="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700" data-action="set-view" data-view="prepare">Go to Prepare</button>
+      </div>`;
+    return `
+      <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+        ${toolbarHtml()}
+        <div class="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          ${state.loading.applications ? loadingGridHtml() : (cards || empty)}
+        </div>
+      </div>`;
+  }
+
+  function loadingGridHtml() {
+    return Array.from({ length: 3 }).map(() => `<div class="h-40 animate-pulse rounded-2xl bg-zinc-200/60"></div>`).join('');
+  }
+
+  function toolbarHtml() {
+    return `
+      <div class="flex flex-wrap items-center gap-2.5 rounded-2xl bg-white p-3 shadow-card">
+        <select class="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-700 focus:border-brand-400 focus:outline-none" data-bind="filter-status">
+          <option value="">All statuses</option>
+          ${STATUS_OPTIONS.map(s => `<option value="${s}" ${state.filters.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+        <input type="text" placeholder="Filter by company…" value="${esc(state.filters.company)}"
+          class="w-40 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-700 placeholder:text-zinc-400 focus:border-brand-400 focus:outline-none"
+          data-bind="filter-company" />
+        <div class="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5">
+          <span class="text-xs text-zinc-400">Min score</span>
+          <input type="number" min="0" max="100" step="5" placeholder="0" value="${esc(state.filters.minScore)}"
+            class="w-12 bg-transparent text-sm text-zinc-700 focus:outline-none" data-bind="filter-minscore" />
+          <span class="text-xs text-zinc-400">%</span>
+        </div>
+        <div class="ml-auto flex items-center gap-2">
+          <input type="number" min="1" max="90" value="${esc(state.syncDays)}" class="w-16 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-sm text-zinc-700 focus:outline-none" data-bind="sync-days" title="Days to look back" />
+          <button class="flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60" data-action="sync-gmail" ${state.loading.sync ? 'disabled' : ''}>
+            ${state.loading.sync ? iconSpinner() : '✉️'} Sync Gmail
+          </button>
+        </div>
+      </div>`;
+  }
+
+  function applicationCardHtml(app) {
+    const job = jobFor(app.job_id);
+    const company = job ? job.company : `Job #${app.job_id}`;
+    const role = job ? job.role : '—';
+    return `
+      <div class="cursor-pointer rounded-2xl bg-white p-4 shadow-card transition-shadow hover:shadow-pop" data-action="open-application" data-id="${app.id}">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="truncate text-sm font-semibold text-zinc-900">${esc(role)}</div>
+            <div class="truncate text-sm text-zinc-500">${esc(company)}</div>
+          </div>
+          ${statusBadge(app.status)}
+        </div>
+        <div class="mt-4 flex items-center justify-between">
+          <span class="text-xs text-zinc-400">Applied ${fmtDate(app.submitted_at)}</span>
+          ${app.match_score != null ? scoreBadge(app.match_score) : '<span class="text-xs text-zinc-300">No score yet</span>'}
+        </div>
+        ${app.confirmed_at ? `<div class="mt-2 text-xs font-medium text-brand-600">✓ Confirmed via ${esc(app.confirmation_source)}</div>` : ''}
+      </div>`;
+  }
+
+  // ---------------------------------------------------------------------
+  // Render: Application detail drawer
+  // ---------------------------------------------------------------------
+  function detailDrawerHtml() {
+    if (!state.detail) return '';
+    const { application: app, emails, notesDraft } = state.detail;
+    const job = jobFor(app.job_id);
+    const resume = resumeFor(app.resume_id);
+
+    const docsHtml = (app.documents || []).length
+      ? app.documents.map(documentCardHtml).join('')
+      : `<p class="text-sm text-zinc-400">No documents linked yet.</p>`;
+
+    const emailsHtml = emails.length
+      ? emails.map(emailEventHtml).join('')
+      : `<p class="text-sm text-zinc-400">No synced emails yet. Try "Sync Gmail" from the Applications toolbar.</p>`;
+
+    return `
+      <div class="fixed inset-0 z-40 flex justify-end">
+        <div class="absolute inset-0 bg-zinc-900/30 anim-fade" data-action="close-detail"></div>
+        <div class="anim-slide relative flex h-full w-full max-w-lg flex-col bg-[#faf9f6] shadow-panel">
+          <div class="flex items-start justify-between border-b border-zinc-200 px-5 py-4">
+            <div class="min-w-0">
+              <div class="text-base font-bold text-zinc-900">${esc(job ? job.role : 'Unknown role')}</div>
+              <div class="text-sm text-zinc-500">${esc(job ? job.company : '')} · resume: ${esc(resume ? resume.filename : app.resume_id)}</div>
+            </div>
+            <button class="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-700" data-action="close-detail">✕</button>
+          </div>
+
+          <div class="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+            <section class="rounded-2xl bg-white p-4 shadow-card">
+              <div class="flex flex-wrap items-center gap-3">
+                <label class="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</label>
+                <select class="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm font-medium focus:border-brand-400 focus:outline-none" data-action="update-status" data-id="${app.id}">
+                  ${STATUS_OPTIONS.map(s => `<option value="${s}" ${app.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+                </select>
+                ${app.match_score != null ? scoreBadge(app.match_score) : ''}
+              </div>
+              <dl class="mt-3 grid grid-cols-2 gap-2 text-xs text-zinc-500">
+                <div><dt class="text-zinc-400">Submitted</dt><dd class="font-medium text-zinc-700">${fmtDate(app.submitted_at)}</dd></div>
+                <div><dt class="text-zinc-400">Method</dt><dd class="font-medium text-zinc-700">${esc(app.submission_method)}</dd></div>
+              </dl>
+
+              <div class="mt-3 border-t border-zinc-100 pt-3">
+                ${app.confirmed_at
+                  ? `<div class="flex items-center gap-1.5 text-sm font-medium text-brand-700">✓ Confirmed via ${esc(app.confirmation_source)} on ${fmtDate(app.confirmed_at)}</div>`
+                  : `<button class="rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 hover:bg-brand-100" data-action="confirm-manually" data-id="${app.id}">Confirm submission manually</button>`}
+              </div>
+
+              <div class="mt-3 border-t border-zinc-100 pt-3">
+                <label class="text-xs font-semibold uppercase tracking-wide text-zinc-400">Notes</label>
+                <textarea rows="3" class="mt-1.5 w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-sm focus:border-brand-400 focus:outline-none" data-bind="notes-draft" placeholder="Add a note…">${esc(notesDraft)}</textarea>
+                <button class="mt-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800" data-action="save-notes" data-id="${app.id}">Save notes</button>
+              </div>
+            </section>
+
+            <section>
+              <h4 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Documents</h4>
+              <div class="space-y-2">${docsHtml}</div>
+            </section>
+
+            <section>
+              <h4 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Email activity</h4>
+              <div class="space-y-2">${emailsHtml}</div>
+            </section>
+
+            <section class="border-t border-zinc-200 pt-4">
+              <button class="w-full rounded-lg border border-rose-200 bg-rose-50 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-100" data-action="delete-application" data-id="${app.id}">Delete application</button>
+            </section>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function documentCardHtml(doc) {
+    const label = DOC_LABELS[doc.doc_type] || doc.doc_type;
+    const url = fileUrl(doc.file_path);
+    return `
+      <div class="rounded-xl border border-zinc-200 bg-white p-3">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold text-zinc-800">${esc(label)}</span>
+          <div class="flex items-center gap-2">
+            ${doc.match_score != null ? scoreBadge(doc.match_score) : ''}
+            ${url ? `<a class="text-xs font-semibold text-brand-600 hover:underline" href="${esc(url)}" target="_blank" rel="noopener">Download ↗</a>` : ''}
+          </div>
+        </div>
+        ${doc.content_text ? `
+          <details class="mt-1.5">
+            <summary class="text-xs font-medium text-zinc-400 hover:text-zinc-600">View source</summary>
+            <pre class="latex-pre mt-1.5 max-h-48 overflow-y-auto rounded-lg bg-zinc-50 p-2 text-[11px] text-zinc-600">${esc(doc.content_text)}</pre>
+          </details>` : ''}
+        <div class="mt-1 text-[11px] text-zinc-400">${fmtDate(doc.created_at)}</div>
+      </div>`;
+  }
+
+  function emailEventHtml(ev) {
+    const intentCls = INTENT_STYLES[ev.detected_intent] || INTENT_STYLES.unknown;
+    return `
+      <div class="rounded-xl border border-zinc-200 bg-white p-3">
+        <div class="flex items-center justify-between gap-2">
+          <span class="truncate text-sm font-medium text-zinc-800">${esc(ev.subject || '(no subject)')}</span>
+          <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${intentCls}">${esc((ev.detected_intent || 'unknown').replace('_', ' '))}</span>
+        </div>
+        <p class="mt-1 line-clamp-2 text-xs text-zinc-500">${esc(ev.snippet || '')}</p>
+        <div class="mt-1.5 flex items-center justify-between text-[11px] text-zinc-400">
+          <span>${fmtDateTime(ev.received_at)}</span>
+          ${ev.status_change ? `<span class="font-semibold text-brand-600">→ ${esc(ev.status_change)}</span>` : ''}
+        </div>
+      </div>`;
+  }
+
+  // ---------------------------------------------------------------------
+  // Render: Prepare view
+  // ---------------------------------------------------------------------
+  function prepareViewHtml() {
+    const p = state.prepare;
+    return `
+      <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          ${prepareResumeColumnHtml()}
+          ${prepareJobColumnHtml()}
+        </div>
+        ${p.resumeId && p.jobId ? prepareActionsHtml() : `
+          <div class="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-white/50 p-6 text-center text-sm text-zinc-400">
+            Select (or add) a resume and a job description above to generate documents.
+          </div>`}
+      </div>`;
+  }
+
+  function prepareResumeColumnHtml() {
+    const p = state.prepare;
+    const items = state.resumes.map(r => `
+      <button class="w-full rounded-xl border p-3 text-left transition-colors ${p.resumeId === r.id ? 'border-brand-400 bg-brand-50' : 'border-zinc-200 bg-white hover:border-zinc-300'}" data-action="select-resume" data-id="${r.id}">
+        <div class="text-sm font-medium text-zinc-800">${esc(r.filename)}</div>
+        <div class="text-xs text-zinc-400">Uploaded ${fmtDate(r.upload_date)}</div>
+      </button>`).join('');
+    return `
+      <div class="rounded-2xl bg-white p-4 shadow-card">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-zinc-800">1. Resume</h3>
+          <button class="text-xs font-semibold text-brand-600 hover:underline" data-action="toggle-new-resume">${p.showNewResume ? 'Cancel' : '+ Upload new'}</button>
+        </div>
+        <div class="mt-3 space-y-2 max-h-56 overflow-y-auto">
+          ${items || `<p class="text-sm text-zinc-400">No resumes uploaded yet.</p>`}
+        </div>
+        ${p.showNewResume ? `
+          <div class="mt-3 border-t border-zinc-100 pt-3">
+            <input type="file" accept="application/pdf" class="block w-full text-sm text-zinc-600" id="resume-file-input" />
+            <button class="mt-2 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800" data-action="upload-resume">Upload PDF</button>
+          </div>` : ''}
+      </div>`;
+  }
+
+  function prepareJobColumnHtml() {
+    const p = state.prepare;
+    const items = state.jobs.map(j => `
+      <button class="w-full rounded-xl border p-3 text-left transition-colors ${p.jobId === j.id ? 'border-brand-400 bg-brand-50' : 'border-zinc-200 bg-white hover:border-zinc-300'}" data-action="select-job" data-id="${j.id}">
+        <div class="text-sm font-medium text-zinc-800">${esc(j.role)}</div>
+        <div class="text-xs text-zinc-400">${esc(j.company)} · ${fmtDate(j.upload_date)}</div>
+      </button>`).join('');
+    const nj = p.newJob;
+    return `
+      <div class="rounded-2xl bg-white p-4 shadow-card">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-zinc-800">2. Job description</h3>
+          <button class="text-xs font-semibold text-brand-600 hover:underline" data-action="toggle-new-job">${p.showNewJob ? 'Cancel' : '+ Add new'}</button>
+        </div>
+        <div class="mt-3 space-y-2 max-h-56 overflow-y-auto">
+          ${items || `<p class="text-sm text-zinc-400">No job descriptions saved yet.</p>`}
+        </div>
+        ${p.showNewJob ? `
+          <div class="mt-3 space-y-2 border-t border-zinc-100 pt-3">
+            <div class="flex gap-2">
+              <input class="w-1/2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none" placeholder="Company" value="${esc(nj.company)}" data-bind="new-job-company" />
+              <input class="w-1/2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none" placeholder="Role" value="${esc(nj.role)}" data-bind="new-job-role" />
+            </div>
+            <textarea rows="4" class="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-sm focus:border-brand-400 focus:outline-none" placeholder="Paste the job description text…" data-bind="new-job-text">${esc(nj.raw_text)}</textarea>
+            <input class="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none" placeholder="Posting URL (optional)" value="${esc(nj.url)}" data-bind="new-job-url" />
+            <button class="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800" data-action="save-new-job">Save job description</button>
+          </div>` : ''}
+      </div>`;
+  }
+
+  function prepareActionsHtml() {
+    const p = state.prepare;
+    const docs = p.documents;
+    const has = t => docs.some(d => d.doc_type === t);
+    const genButton = (kind, label, doneTypes) => `
+      <button class="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 shadow-card hover:border-brand-300 hover:text-brand-700 disabled:opacity-60" data-action="run-generation" data-kind="${kind}" ${p.busy[kind] ? 'disabled' : ''}>
+        ${p.busy[kind] ? iconSpinner() : (doneTypes.some(has) ? '↻' : '✨')} ${label}${doneTypes.some(has) ? ' (regenerate)' : ''}
+      </button>`;
+
+    return `
+      <div class="mt-5 rounded-2xl bg-white p-4 shadow-card">
+        <h3 class="text-sm font-semibold text-zinc-800">3. Generate documents</h3>
+        <div class="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+          ${genButton('score', 'Score match', ['score'])}
+          ${genButton('cv', 'Tailor CV', ['cv_pdf', 'cv_latex'])}
+          ${genButton('cover', 'Cover letter', ['cover_letter_pdf', 'cover_letter_latex'])}
+        </div>
+        <p class="mt-2 text-xs text-zinc-400">Document generation calls a real LLM (and compiles LaTeX for CV/cover letter) — this can take anywhere from a few seconds to a couple of minutes.</p>
+
+        <div class="mt-4 space-y-2">
+          ${docs.length ? docs.map(documentCardHtml).join('') : `<p class="text-sm text-zinc-400">Nothing generated yet for this pair.</p>`}
+        </div>
+
+        <div class="mt-5 border-t border-zinc-100 pt-4">
+          ${p.submitForm ? submitFormHtml() : `
+            <button class="w-full rounded-xl bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700" data-action="open-submit-form">Mark as submitted →</button>`}
+        </div>
+      </div>`;
+  }
+
+  function submitFormHtml() {
+    const f = state.prepare.submitForm;
+    return `
+      <div class="rounded-xl border border-brand-200 bg-brand-50 p-3">
+        <h4 class="text-sm font-semibold text-brand-800">Confirm submission details</h4>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <label class="text-xs text-brand-700">Submitted on</label>
+          <input type="date" value="${esc(f.submitted_at)}" class="rounded-lg border border-brand-200 bg-white px-2 py-1 text-sm" data-bind="submit-date" />
+          <label class="text-xs text-brand-700">Method</label>
+          <select class="rounded-lg border border-brand-200 bg-white px-2 py-1 text-sm" data-bind="submit-method">
+            <option value="manual" ${f.submission_method === 'manual' ? 'selected' : ''}>Manual</option>
+            <option value="automatic" ${f.submission_method === 'automatic' ? 'selected' : ''}>Automatic</option>
+          </select>
+        </div>
+        <div class="mt-3 flex justify-end gap-2">
+          <button class="rounded-lg px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-100" data-action="close-submit-form">Cancel</button>
+          <button class="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700" data-action="confirm-submit">Create application</button>
+        </div>
+      </div>`;
+  }
+
+  // ---------------------------------------------------------------------
+  // Render: Chat widget
+  // ---------------------------------------------------------------------
+  function chatWidgetHtml() {
+    const c = state.chat;
+    if (!c.open) {
+      return `
+        <button class="fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-2xl text-white shadow-pop hover:bg-brand-700" data-action="toggle-chat" title="Ask JAM">💬</button>`;
+    }
+    const bubbles = c.messages.map(m => `
+      <div class="flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}">
+        <div class="max-w-[85%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap ${m.role === 'user' ? 'bg-brand-600 text-white' : 'bg-zinc-100 text-zinc-800'}">${esc(m.content)}</div>
+      </div>`).join('');
+    return `
+      <div class="fixed bottom-5 right-5 z-50 flex h-[520px] w-[360px] max-w-[92vw] flex-col overflow-hidden rounded-2xl bg-white shadow-pop anim-fade">
+        <div class="flex items-center justify-between bg-zinc-900 px-4 py-3">
+          <div class="text-sm font-semibold text-white">JAM Assistant</div>
+          <button class="text-zinc-300 hover:text-white" data-action="toggle-chat">✕</button>
+        </div>
+        <div id="chat-scroll" class="flex-1 space-y-2.5 overflow-y-auto p-3.5">
+          ${bubbles || `<p class="text-center text-xs text-zinc-400 mt-6">Ask about your applications, or say "score my resume against job 1".</p>`}
+          ${c.busy ? `<div class="flex justify-start"><div class="rounded-2xl bg-zinc-100 px-3.5 py-2 text-zinc-400">${iconSpinner()}</div></div>` : ''}
+        </div>
+        <div class="flex items-center gap-2 border-t border-zinc-100 p-2.5">
+          <input class="flex-1 rounded-full border border-zinc-200 bg-zinc-50 px-3.5 py-2 text-sm focus:border-brand-400 focus:outline-none" placeholder="Message JAM…" value="${esc(c.draft)}" data-bind="chat-draft" ${c.busy ? 'disabled' : ''} />
+          <button class="flex h-9 w-9 items-center justify-center rounded-full bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50" data-action="send-chat" ${c.busy ? 'disabled' : ''}>➤</button>
+        </div>
+      </div>`;
+  }
+
+  // ---------------------------------------------------------------------
+  // Root render
+  // ---------------------------------------------------------------------
+  function render() {
+    const app = document.getElementById('app');
+    app.innerHTML = `
+      ${navbarHtml()}
+      <main>${state.view === 'applications' ? applicationsViewHtml() : prepareViewHtml()}</main>
+      ${detailDrawerHtml()}
+      ${chatWidgetHtml()}
+      ${toastHtml()}
+      ${confirmDialogHtml()}
+    `;
+    focusPreservingInputs();
+  }
+
+  // Re-focus + restore cursor for the input currently being typed in, since
+  // render() replaces the whole DOM subtree on every keystroke-driven update.
+  let lastFocusedBind = null;
+  function focusPreservingInputs() {
+    if (!lastFocusedBind) return;
+    const el = document.querySelector(`[data-bind="${lastFocusedBind}"]`);
+    if (el) {
+      el.focus();
+      if (typeof el.selectionStart === 'number') {
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Event delegation
+  // ---------------------------------------------------------------------
+  document.addEventListener('click', async (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const action = el.dataset.action;
+
+    if (action === 'set-view') { state.view = el.dataset.view; render(); return; }
+    if (action === 'toggle-chat') { state.chat.open = !state.chat.open; render(); return; }
+    if (action === 'send-chat') { sendChatMessage(); return; }
+    if (action === 'sync-gmail') { syncGmail(state.syncDays || 30); return; }
+    if (action === 'open-application') { openApplication(Number(el.dataset.id)); return; }
+    if (action === 'close-detail') { if (e.target === el) closeDetail(); return; }
+    if (action === 'update-status') {
+      patchApplication(Number(el.dataset.id), { status: el.value }, 'Status updated'); return;
+    }
+    if (action === 'confirm-manually') {
+      patchApplication(Number(el.dataset.id), { confirmed_at: new Date().toISOString(), confirmation_source: 'manual' }, 'Marked as confirmed');
+      return;
+    }
+    if (action === 'save-notes') {
+      patchApplication(Number(el.dataset.id), { notes: state.detail.notesDraft }, 'Notes saved'); return;
+    }
+    if (action === 'delete-application') {
+      const id = Number(el.dataset.id);
+      askConfirm({
+        title: 'Delete this application?', message: 'This permanently removes the application and its email history. Generated documents are kept.',
+        confirmLabel: 'Delete', danger: true, onConfirm: () => deleteApplication(id),
+      });
+      return;
+    }
+    if (action === 'dismiss-confirm') { if (e.target === el || el.dataset.action === 'dismiss-confirm') { state.confirmDialog = null; render(); } return; }
+    if (action === 'run-confirm') {
+      const cb = state.confirmDialog && state.confirmDialog.onConfirm;
+      state.confirmDialog = null; render();
+      if (cb) cb();
+      return;
+    }
+    if (action === 'toggle-new-resume') { state.prepare.showNewResume = !state.prepare.showNewResume; render(); return; }
+    if (action === 'toggle-new-job') { state.prepare.showNewJob = !state.prepare.showNewJob; render(); return; }
+    if (action === 'select-resume') { selectPrepareResume(Number(el.dataset.id)); return; }
+    if (action === 'select-job') { selectPrepareJob(Number(el.dataset.id)); return; }
+    if (action === 'upload-resume') {
+      const input = document.getElementById('resume-file-input');
+      if (input && input.files[0]) uploadResume(input.files[0]);
+      else showToast('Choose a PDF file first', 'error');
+      return;
+    }
+    if (action === 'save-new-job') { saveNewJob(); return; }
+    if (action === 'run-generation') { runGeneration(el.dataset.kind); return; }
+    if (action === 'open-submit-form') {
+      state.prepare.submitForm = { submitted_at: todayInputValue(), submission_method: 'manual' };
+      render(); return;
+    }
+    if (action === 'close-submit-form') { state.prepare.submitForm = null; render(); return; }
+    if (action === 'confirm-submit') { submitApplication(); return; }
+  });
+
+  document.addEventListener('input', (e) => {
+    const el = e.target;
+    const bind = el.dataset && el.dataset.bind;
+    if (!bind) return;
+    const v = el.value;
+    if (bind === 'filter-company') { state.filters.company = v; debounce('company', () => loadApplications()); }
+    else if (bind === 'filter-minscore') { state.filters.minScore = v; debounce('minscore', () => loadApplications()); }
+    else if (bind === 'sync-days') { state.syncDays = v; }
+    else if (bind === 'notes-draft') { state.detail.notesDraft = v; }
+    else if (bind === 'new-job-company') { state.prepare.newJob.company = v; }
+    else if (bind === 'new-job-role') { state.prepare.newJob.role = v; }
+    else if (bind === 'new-job-text') { state.prepare.newJob.raw_text = v; }
+    else if (bind === 'new-job-url') { state.prepare.newJob.url = v; }
+    else if (bind === 'submit-date') { state.prepare.submitForm.submitted_at = v; }
+    else if (bind === 'chat-draft') { state.chat.draft = v; }
+  });
+
+  // Tracks the currently-focused bound field (not just "last typed in") so a
+  // re-render triggered by an unrelated action (e.g. a button click, or a
+  // background sync finishing) never steals focus back to a field the user
+  // has since clicked away from.
+  document.addEventListener('focusin', (e) => {
+    const bind = e.target.dataset && e.target.dataset.bind;
+    lastFocusedBind = bind || null;
+  });
+
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    const bind = el.dataset && el.dataset.bind;
+    if (!bind) return;
+    if (bind === 'filter-status') { state.filters.status = el.value; loadApplications(); }
+    else if (bind === 'submit-method') { state.prepare.submitForm.submission_method = el.value; }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.dataset && e.target.dataset.bind === 'chat-draft') {
+      e.preventDefault(); sendChatMessage();
+    }
+  });
+
+  const debounceTimers = {};
+  function debounce(key, fn, wait = 400) {
+    clearTimeout(debounceTimers[key]);
+    debounceTimers[key] = setTimeout(fn, wait);
+  }
+
+  // ---------------------------------------------------------------------
+  // Boot
+  // ---------------------------------------------------------------------
+  async function boot() {
+    render();
+    await Promise.all([loadHealth(), loadResumesAndJobs(), loadApplications()]);
+    render();
+  }
+  boot();
+  </script>
+</body>
+</html>
