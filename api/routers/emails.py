@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from src.agent import tools
@@ -21,16 +21,21 @@ def _serialize_email_event(event) -> dict:
 
 
 @router.post("/sync")
-def sync_emails(db: Session = Depends(get_db)) -> dict:
+def sync_emails(
+    days: int = Query(default=7, ge=1, le=90),
+    db: Session = Depends(get_db),
+) -> dict:
     """Trigger a Gmail sync: fetch recent emails for every known company,
     classify intent, and auto-update application statuses.
 
     Delegates straight to tools.parse_emails_tool -- the exact same function
     the chat agent calls for this -- rather than re-implementing the fetch/
     classify/update flow here. That keeps this logic in one place instead of
-    the API and the agent silently drifting apart over time.
+    the API and the agent silently drifting apart over time. `days` defaults
+    to CLAUDE.md's documented 7-day window but is overridable -- useful for
+    a first-time sync against a company applied to further back than that.
     """
-    result = tools.parse_emails_tool(db)
+    result = tools.parse_emails_tool(db, days=days)
     if not result["success"]:
         raise HTTPException(status_code=502, detail=result.get("error", "Gmail sync failed"))
     return result

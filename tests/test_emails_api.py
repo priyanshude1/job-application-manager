@@ -39,8 +39,8 @@ def _create_application(client):
 def test_sync_emails_endpoint_delegates_to_parse_emails_tool(client, monkeypatch):
     calls = []
 
-    def fake_parse_emails_tool(db):
-        calls.append(db)
+    def fake_parse_emails_tool(db, days=7):
+        calls.append((db, days))
         return {"success": True, "processed": 2, "events": [], "errors": []}
 
     monkeypatch.setattr(tools, "parse_emails_tool", fake_parse_emails_tool)
@@ -53,7 +53,7 @@ def test_sync_emails_endpoint_delegates_to_parse_emails_tool(client, monkeypatch
 
 
 def test_sync_emails_endpoint_returns_502_on_auth_failure(client, monkeypatch):
-    def failing_parse_emails_tool(db):
+    def failing_parse_emails_tool(db, days=7):
         return {"success": False, "error": "Gmail OAuth client secret not found"}
 
     monkeypatch.setattr(tools, "parse_emails_tool", failing_parse_emails_tool)
