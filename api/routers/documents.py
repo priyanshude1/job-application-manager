@@ -46,6 +46,28 @@ def upload_resume(file: UploadFile = File(...), db: Session = Depends(get_db)) -
     return {"id": resume.id, "filename": resume.filename, "file_path": resume.file_path}
 
 
+@router.get("/resumes")
+def list_resumes(db: Session = Depends(get_db)) -> list[dict]:
+    return [
+        {"id": resume.id, "filename": resume.filename, "upload_date": resume.upload_date}
+        for resume in crud.list_resumes(db)
+    ]
+
+
+@router.get("/jobs")
+def list_jobs(db: Session = Depends(get_db)) -> list[dict]:
+    return [
+        {
+            "id": job.id,
+            "company": job.company,
+            "role": job.role,
+            "upload_date": job.upload_date,
+            "url": job.url,
+        }
+        for job in crud.list_job_descriptions(db)
+    ]
+
+
 @router.post("/jobs/upload")
 def upload_job_description(
     file: UploadFile = File(...),

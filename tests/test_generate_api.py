@@ -124,6 +124,30 @@ def test_generate_score_persists_normalized_score_document(client, monkeypatch):
     assert response.json()["document"]["match_score"] == 0.85
 
 
+def test_list_prep_documents_returns_unlinked_documents_for_pair(client, monkeypatch):
+    resume_id, job_id = _create_source_records()
+    monkeypatch.setattr(
+        generate,
+        "score_match",
+        lambda *args, **kwargs: {"match_score": 0.6, "gap_analysis": "Some gaps."},
+    )
+    client.post("/generate/score", json={"resume_id": resume_id, "job_id": job_id})
+
+    response = client.get("/generate/documents", params={"resume_id": resume_id, "job_id": job_id})
+
+    assert response.status_code == 200
+    documents = response.json()
+    assert len(documents) == 1
+    assert documents[0]["doc_type"] == "score"
+    assert documents[0]["match_score"] == 0.6
+
+
+def test_list_prep_documents_empty_for_unknown_pair(client):
+    response = client.get("/generate/documents", params={"resume_id": 999, "job_id": 999})
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 def test_generation_validates_source_records(client):
     response = client.post("/generate/score", json={"resume_id": 999, "job_id": 999})
 

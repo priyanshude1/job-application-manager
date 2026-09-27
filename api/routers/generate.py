@@ -68,6 +68,17 @@ def _log_generation(
     )
 
 
+@router.get("/documents")
+def list_prep_documents(resume_id: int, job_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    """Prep-stage documents (score, tailored CV, cover letter) for a resume/job
+    pair that hasn't become an application yet -- once it does, these same
+    documents get backfilled onto it and show up via GET /applications/{id}
+    instead.
+    """
+    documents = crud.list_unlinked_documents_for_pair(db, resume_id, job_id)
+    return [_serialize_document(document) for document in documents]
+
+
 @router.post("/cover-letter", status_code=201)
 def generate_cover_letter_endpoint(
     payload: GenerationRequest, db: Session = Depends(get_db)
