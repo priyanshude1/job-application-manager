@@ -216,6 +216,19 @@ def list_unlinked_documents_for_pair(
 # --- Email Events ---
 
 
+def email_event_exists(db: Session, raw_email_id: str) -> bool:
+    """Check dedup before spending an LLM call classifying an email's intent.
+
+    create_email_event below also re-checks this at insert time (its own
+    dedup guard), but a caller that classifies first and inserts second
+    needs to know *before* classifying whether this email was already
+    processed in an earlier sync -- otherwise a repeat sync would burn an
+    OpenRouter call, and re-run any status update, for an email already
+    handled.
+    """
+    return db.query(EmailEvent).filter(EmailEvent.raw_email_id == raw_email_id).first() is not None
+
+
 def create_email_event(
     db: Session,
     raw_email_id: str,
@@ -224,6 +237,7 @@ def create_email_event(
     snippet: str | None = None,
     detected_intent: str | None = None,
     status_change: str | None = None,
+    received_at: datetime | None = None,
 ) -> EmailEvent | None:
     existing = db.query(EmailEvent).filter(EmailEvent.raw_email_id == raw_email_id).first()
     if existing is not None:
@@ -235,6 +249,7 @@ def create_email_event(
         snippet=snippet,
         detected_intent=detected_intent,
         status_change=status_change,
+        **({"received_at": received_at} if received_at is not None else {}),
     )
     db.add(event)
     db.commit()

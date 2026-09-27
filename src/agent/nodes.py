@@ -141,8 +141,9 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "parse_emails",
-        "description": "Sync Gmail and auto-update application statuses from detected "
-        "emails. Not yet configured.",
+        "description": "Sync Gmail for the last 7 days, classify any emails matching known "
+        "companies, and auto-update application statuses (interview invite, rejection, "
+        "offer, or submission confirmation) from what's detected.",
         "input_schema": {"type": "object", "properties": {}},
     },
 ]

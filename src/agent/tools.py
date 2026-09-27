@@ -1,14 +1,17 @@
 import os
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy.orm import Session
 
 from src.database import crud
+from src.database.models import utcnow
 from src.document_processing.jd_parser import parse_job_description
+from src.integrations.gmail_client import fetch_recent_emails, get_gmail_service
 from src.llm.cover_letter import generate_and_compile_cover_letter
 from src.llm.cv_tailoring import tailor_and_compile_cv
+from src.llm.email_parser import INTENT_STATUS_MAP, classify_email_intent
 from src.llm.scoring import score_match
 from src.tracking.mlflow_tracker import log_generation_run_safe
 
@@ -296,6 +299,89 @@ def search_applications_tool(db: Session, query: str) -> dict:
     }
 
 
-def parse_emails_tool(db: Session) -> dict:
-    del db
-    return {"success": False, "error": "Email sync is not configured yet"}
+def _email_event(event) -> dict:
+    return {
+        "id": event.id,
+        "application_id": event.application_id,
+        "subject": event.subject,
+        "snippet": event.snippet,
+        "detected_intent": event.detected_intent,
+        "status_change": event.status_change,
+        "received_at": event.received_at,
+    }
+
+
+def parse_emails_tool(db: Session, *, service: Any | None = None, days: int = 7) -> dict:
+    """Sync Gmail and auto-update application statuses from detected emails.
+
+    Runs one Gmail search per known company (from job_descriptions) rather
+    than one combined query across all of them, so every fetched email can
+    be unambiguously attributed back to the company it matched -- needed to
+    know which application's status, if any, to update. Within a company,
+    the most recently created application is what a status-changing intent
+    is applied to (a personal job tracker rarely has two simultaneous open
+    applications at the same company; this is a deliberate simplification,
+    not a claim of perfect disambiguation -- manual override in the
+    dashboard is the safety net CLAUDE.md already documents for
+    misclassification generally).
+
+    Dedup happens before classification, not just before the DB write: an
+    email already seen in an earlier sync is skipped outright, so a repeat
+    sync never re-spends an OpenRouter call or re-applies the same status
+    change twice. `service` is injectable (same DI pattern as every other
+    external client in this codebase) so tests can supply a fake Gmail
+    service instead of a real one.
+    """
+    company_names = sorted({job.company for job in crud.list_job_descriptions(db)})
+    if not company_names:
+        return {"success": True, "processed": 0, "events": [], "errors": []}
+
+    try:
+        gmail_service = service or get_gmail_service()
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+    events = []
+    errors = []
+    for company in company_names:
+        try:
+            emails = fetch_recent_emails(gmail_service, company_names=[company], days=days)
+        except Exception as exc:
+            errors.append({"company": company, "error": str(exc)})
+            continue
+
+        applications = crud.list_applications(db, company=company)
+        application = applications[0] if applications else None
+
+        for email in emails:
+            if crud.email_event_exists(db, email["raw_email_id"]):
+                continue
+
+            intent = classify_email_intent(email["subject"], email["snippet"])
+
+            status_change = None
+            if application is not None:
+                if intent in INTENT_STATUS_MAP:
+                    status_change = INTENT_STATUS_MAP[intent]
+                    crud.update_application(db, application.id, status=status_change)
+                elif intent == "submission_confirmation":
+                    crud.update_application(
+                        db,
+                        application.id,
+                        confirmed_at=email["received_at"] or utcnow(),
+                        confirmation_source="email",
+                    )
+
+            event = crud.create_email_event(
+                db,
+                raw_email_id=email["raw_email_id"],
+                application_id=application.id if application else None,
+                subject=email["subject"],
+                snippet=email["snippet"],
+                detected_intent=intent,
+                status_change=status_change,
+                received_at=email["received_at"],
+            )
+            events.append(_email_event(event))
+
+    return {"success": True, "processed": len(events), "events": events, "errors": errors}
