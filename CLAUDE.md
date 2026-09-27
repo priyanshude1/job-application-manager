@@ -5,9 +5,9 @@
 
 ## Project Summary
 
-A personal AI-powered job application management system. Handles the full job application lifecycle — from tailoring documents to tracking application statuses — using LLM pipelines, a LangGraph agent, and Gmail MCP integration. Built as a local Docker application (personal tool handling private career data — no cloud deployment needed or appropriate).
+A personal AI-powered job application management system. Handles the full job application lifecycle — from tailoring documents to tracking application statuses — using LLM pipelines, a LangGraph agent, and direct Gmail API integration. Built as a local Docker application (personal tool handling private career data — no cloud deployment needed or appropriate).
 
-Demonstrates: LangGraph, LangSmith, MLflow, GitHub Actions CI/CD, model routing across Anthropic + OpenRouter APIs, Gmail MCP, LaTeX PDF generation, and relational database design.
+Demonstrates: LangGraph, LangSmith, MLflow, GitHub Actions CI/CD, model routing across Anthropic + OpenRouter APIs, Gmail API, LaTeX PDF generation, and relational database design.
 
 ---
 
@@ -17,7 +17,7 @@ Demonstrates: LangGraph, LangSmith, MLflow, GitHub Actions CI/CD, model routing 
 - Tailor and recompile CV as LaTeX PDF per job description
 - Score job-resume match with gap analysis
 - Track all applications and statuses in one dashboard
-- Auto-update application status by parsing Gmail via MCP
+- Auto-update application status by parsing Gmail via the Gmail API
 - Agentic chatbot interface for natural language interaction with the system
 - Fill portfolio gaps: LangGraph, LangSmith, MLflow, CI/CD, model routing
 
@@ -43,7 +43,7 @@ Demonstrates: LangGraph, LangSmith, MLflow, GitHub Actions CI/CD, model routing 
 | Primary LLM | Anthropic Claude Haiku | Reliable structured output, cheap, sufficient context |
 | Agent LLM | Anthropic Claude Sonnet | Large context window for multi-turn agent sessions |
 | Email/simple tasks | Free OpenRouter models | Classification tasks, no spend needed |
-| Email integration | Gmail MCP | Auto status tracking from inbox |
+| Email integration | Gmail API (direct, OAuth) | Auto status tracking from inbox |
 | Database | SQLite + SQLAlchemy | Simple, sufficient for personal use |
 | API framework | FastAPI | Standard ML API framework |
 | Frontend | Tailwind CSS, Claude Code builds | Decent UI, minimal developer time |
@@ -238,13 +238,15 @@ MLflow tracking server runs locally via docker-compose. UI accessible at `localh
 
 ---
 
-## Gmail MCP Integration
+## Gmail API Integration
 
-Gmail MCP is already connected in Claude Code. Used for email status auto-tracking.
+Direct Gmail API integration via `google-api-python-client` + `google-auth-oauthlib` — not MCP. Gmail MCP servers (e.g. the community `server-gmail-autoauth-mcp`) are themselves just a Gmail API wrapper exposed over the MCP protocol for *interactive agent clients* (Claude Desktop, Claude Code) to call as tools during a session. JAM's `parse_emails` tool runs inside the deployed FastAPI backend with no agent-client session in the loop at request time, so MCP would only add a subprocess + protocol layer around a call that can be made directly. "Gmail MCP is already connected in Claude Code" (the earlier assumption behind this section) is true only for *interactive Claude Code sessions* — never for the standalone app.
+
+Auth: single-user, local, one-time setup. A Google Cloud OAuth client (type "Desktop app") is created once in Google Cloud Console, its client secret saved to `GMAIL_CREDENTIALS_PATH`. First run opens a browser for consent via `google_auth_oauthlib.flow.InstalledAppFlow`; the resulting refresh token is cached at `GMAIL_TOKEN_PATH` and silently reused/refreshed on every run after that — no repeated consent, no web OAuth redirect flow (that machinery is for multi-user web apps, which this isn't).
 
 Flow:
 1. Agent calls `parse_emails` tool
-2. Tool uses Gmail MCP to fetch recent emails (last 7 days, filtered by known company names from `job_descriptions` table)
+2. Tool authenticates via the cached Gmail token (refreshing it if expired) and calls the Gmail API directly to fetch recent emails (last 7 days, filtered by known company names from `job_descriptions` table)
 3. Each email passed to OpenRouter free model for intent classification
 4. Detected intents trigger status updates in `applications` table
 5. Email event logged in `email_events` table with snippet and detected intent
@@ -297,7 +299,9 @@ job-application-manager/
 ├── templates/
 │   └── cv_template.tex            ← user's existing LaTeX CV template (gitignored)
 ├── data/
-│   └── resumes/                   ← uploaded resume PDFs (gitignored)
+│   ├── resumes/                   ← uploaded resume PDFs (gitignored)
+│   ├── gmail_credentials.json     ← OAuth client secret from Google Cloud Console (gitignored)
+│   └── gmail_token.json           ← cached OAuth refresh token after first-run consent (gitignored)
 ├── outputs/
 │   └── generated/                 ← compiled PDFs and generated documents (gitignored)
 ├── src/
@@ -314,6 +318,9 @@ job-application-manager/
 │   │   ├── cv_tailoring.py        ← LaTeX modification + tectonic compilation
 │   │   ├── scoring.py             ← job match scoring pipeline
 │   │   └── email_parser.py        ← email intent classification
+│   ├── integrations/
+│   │   └── gmail_client.py        ← Gmail API auth + message fetch (mirrors llm/clients.py's
+│   │                                 pattern: the one place the Gmail API is ever called)
 │   ├── agent/
 │   │   ├── state.py               ← AgentState TypedDict
 │   │   ├── tools.py               ← all 8 tool functions
@@ -374,7 +381,7 @@ POST /generate/tailor-cv         → body: {resume_id, job_id}
 POST /generate/score             → body: {resume_id, job_id}
 
 # Email
-POST /emails/sync                → trigger Gmail MCP fetch + parse + status updates
+POST /emails/sync                → trigger Gmail API fetch + parse + status updates
 GET  /emails/{application_id}    → list email events for one application
 
 # Agent
@@ -382,7 +389,7 @@ POST /chat                       → body: {message, session_id}
 DELETE /chat/{session_id}        → clear conversation memory
 
 # System
-GET  /health                     → {status, db, mlflow, gmail_mcp}
+GET  /health                     → {status, db, mlflow, gmail}
 ```
 
 ---
@@ -407,6 +414,10 @@ LANGCHAIN_PROJECT=job-application-manager
 
 # MLflow
 MLFLOW_TRACKING_URI=http://localhost:5001
+
+# Gmail
+GMAIL_CREDENTIALS_PATH=./data/gmail_credentials.json
+GMAIL_TOKEN_PATH=./data/gmail_token.json
 
 # Database
 DATABASE_URL=sqlite:///./jam.db
@@ -466,7 +477,7 @@ Phase 3 (3 days):   LLM pipelines — cover letter, scoring, LaTeX CV
 Phase 4 (3 days):   LangGraph agent — state, tools, nodes, graph assembly,
                     LangSmith tracing, /chat endpoint
 
-Phase 5 (2 days):   Gmail MCP email parsing — fetch, classify,
+Phase 5 (2 days):   Gmail API email parsing — OAuth setup, fetch, classify,
                     auto status updates, deduplication
 
 Phase 6 (1 day):    GitHub Actions CI/CD — test + build workflow
@@ -494,6 +505,12 @@ Total: ~16 days. Buffer for debugging built into each phase estimate.
 - `submission_method='automatic'` is reserved for a future automated-submission feature — no
   automatic-submission logic is implemented; all applications today are created with
   `submission_method='manual'`
+- Gmail OAuth consent screens left in Google Cloud Console's "Testing" publishing status
+  (the default, and fine for this single-user personal use) expire refresh tokens after 7 days
+  regardless of client type — if `parse_emails` starts failing auth after a period of inactivity,
+  redo the one-time browser consent rather than assuming the integration is broken; moving the
+  consent screen to "In production" (no Google verification required for a personal-use app with
+  no public users) avoids this entirely
 
 ---
 
@@ -503,7 +520,7 @@ Total: ~16 days. Buffer for debugging built into each phase estimate.
 - LangSmith production observability — every LLM call traced
 - MLflow prompt experiment tracking — prompt versioning as MLOps practice
 - Model routing — different LLMs for different task types, env-var configurable
-- Gmail MCP integration — real-world external service connection
+- Gmail API integration with OAuth — real-world external service connection
 - Relational database design with SQLAlchemy ORM
 - LaTeX PDF generation with compiler error feedback loop
 - GitHub Actions CI/CD — automated test + build on every push
