@@ -4,6 +4,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from src.agent.nodes import (
+    MAX_AGENT_ITERATIONS,
     make_dispatch_executor,
     make_router_node,
     make_tool_node,
@@ -33,8 +34,8 @@ def _route_after_router(state: AgentState) -> str:
 
 
 def _route_after_tool(state: AgentState) -> str:
-    """Loop for another model decision until the three-tool limit is reached."""
-    if state["error"] or state["tool_call_count"] >= 3:
+    """Loop for another model decision until MAX_AGENT_ITERATIONS is reached."""
+    if state["error"] or state["tool_call_count"] >= MAX_AGENT_ITERATIONS:
         return "response"
     return "router"
 

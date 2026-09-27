@@ -10,7 +10,7 @@ from src.llm.clients import generate_with_anthropic_tools
 
 MEMORY_WINDOW_SIZE = int(os.getenv("MEMORY_WINDOW_SIZE", "8"))
 TOOL_RESULT_MAX_TOKENS = int(os.getenv("TOOL_RESULT_MAX_TOKENS", "1000"))
-MAX_AGENT_ITERATIONS = 3
+MAX_AGENT_ITERATIONS = int(os.getenv("MAX_AGENT_ITERATIONS", "3"))
 ToolExecutor = Callable[[AgentState], dict[str, Any]]
 
 _STATUS_ENUM = [
