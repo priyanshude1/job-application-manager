@@ -21,6 +21,10 @@ langsmith>=0.2.0
 anthropic==0.42.0
 openai==1.59.7
 
+# Gmail API
+google-api-python-client==2.156.0
+google-auth-oauthlib==1.2.1
+
 # Experiment / prompt tracking
 mlflow==3.16.0
 
