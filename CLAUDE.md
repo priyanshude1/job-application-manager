@@ -334,7 +334,9 @@ job-application-manager/
 │   │   ├── applications.py        ← /applications CRUD endpoints
 │   │   ├── documents.py           ← /resume, /jobs upload endpoints
 │   │   ├── generate.py            ← /generate/* LLM task endpoints
-│   │   └── agent.py               ← /chat agent endpoint
+│   │   ├── chat.py                ← /chat agent endpoint
+│   │   └── emails.py              ← /emails/* endpoints, delegates to
+│   │                                 src/agent/tools.py's parse_emails_tool
 │   └── static/
 │       └── index.html             ← Tailwind dashboard UI
 ├── tests/
@@ -505,12 +507,15 @@ Total: ~16 days. Buffer for debugging built into each phase estimate.
 - `submission_method='automatic'` is reserved for a future automated-submission feature — no
   automatic-submission logic is implemented; all applications today are created with
   `submission_method='manual'`
-- Gmail OAuth consent screens left in Google Cloud Console's "Testing" publishing status
-  (the default, and fine for this single-user personal use) expire refresh tokens after 7 days
-  regardless of client type — if `parse_emails` starts failing auth after a period of inactivity,
-  redo the one-time browser consent rather than assuming the integration is broken; moving the
-  consent screen to "In production" (no Google verification required for a personal-use app with
-  no public users) avoids this entirely
+- `gmail.readonly` is a Google-classified Restricted scope, so the OAuth consent screen must stay
+  in "Testing" publishing status — moving to "In production" would require Google's full
+  verification review (and possibly a paid third-party security assessment) for a restricted
+  scope, which isn't realistic for a personal project. While in Testing, only accounts explicitly
+  added under the consent screen's Test users list can complete consent at all (an account not on
+  that list gets a 403 access_denied, confirmed empirically). Testing-status refresh tokens also
+  expire after 7 days regardless of client type — there's no way to avoid this short of full
+  verification, so `parse_emails` failing auth after roughly a week is expected, not a bug; redo
+  the one-time browser consent (`get_gmail_service()`) when it happens
 
 ---
 
