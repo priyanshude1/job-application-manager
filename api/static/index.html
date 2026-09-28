@@ -6,38 +6,51 @@
 <title>JAM · Job Application Manager</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   tailwind.config = {
     theme: {
       extend: {
-        fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
-        colors: {
-          brand: {
-            50: '#f5f3ff', 100: '#ede9fe', 200: '#ddd6fe', 300: '#c4b5fd',
-            400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed', 700: '#6d28d9',
-            800: '#5b21b6', 900: '#4c1d95',
-          },
+        fontFamily: {
+          sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+          display: ['Rajdhani', 'ui-sans-serif', 'sans-serif'],
         },
-        boxShadow: {
-          card: '0 1px 2px 0 rgba(24,24,27,0.04), 0 1px 3px 1px rgba(24,24,27,0.06)',
-          panel: '-8px 0 24px -4px rgba(24,24,27,0.12)',
-          pop: '0 8px 24px -4px rgba(24,24,27,0.18)',
+        colors: {
+          ink: {
+            50: '#eef1ef', 100: '#dfe4e1', 200: '#b9c2bd', 300: '#8b968f',
+            400: '#616d66', 500: '#454f49', 600: '#343a36', 700: '#262a27',
+            800: '#171a18', 900: '#101211', 950: '#08090a',
+          },
+          ember: { 300: '#ffb37a', 400: '#ff9a4d', 500: '#ff7a1a', 600: '#f2600a', 700: '#c94d05' },
+          volt: { 300: '#8bffb8', 400: '#4dffa0', 500: '#22e07a', 600: '#16b85f', 700: '#0f8f4a' },
         },
       },
     },
   };
 </script>
 <style>
-  body { background: #f7f6f3; }
-  ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 8px; }
+  body { background: #08090a; }
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: -1;
+    background:
+      radial-gradient(1100px 550px at 12% -8%, rgba(255,122,26,0.14), transparent 60%),
+      radial-gradient(900px 650px at 105% 8%, rgba(34,224,122,0.11), transparent 60%),
+      radial-gradient(700px 500px at 50% 115%, rgba(255,122,26,0.07), transparent 60%),
+      linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+    background-size: auto, auto, auto, 42px 42px, 42px 42px;
+    pointer-events: none;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #343a36; border-radius: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
-  .anim-fade { animation: fade-in .18s ease-out; }
-  .anim-slide { animation: slide-in .22s cubic-bezier(0.16,1,0.3,1); }
+  @keyframes pulse-glow { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+  .anim-fade { animation: fade-in .2s ease-out; }
+  .anim-slide { animation: slide-in .28s cubic-bezier(0.16,1,0.3,1); }
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner { animation: spin .7s linear infinite; }
   details > summary { cursor: pointer; }
@@ -45,7 +58,7 @@
   .latex-pre { white-space: pre-wrap; word-break: break-word; }
 </style>
 </head>
-<body class="text-zinc-800 antialiased min-h-screen font-sans">
+<body class="min-h-screen bg-ink-950 font-sans text-ink-100 antialiased">
   <div id="app"></div>
 
   <script>
@@ -62,10 +75,11 @@
     syncDays: 30,
     detail: null,          // { application, emails, notesDraft }
     prepare: {
+      step: 0,             // 0 resume, 1 job, 2 generate, 3 deploy
       resumeId: null, jobId: null, documents: [],
       showNewResume: false, showNewJob: false,
       newJob: { company: '', role: '', raw_text: '', url: '' },
-      submitForm: null,     // { submitted_at, submission_method } when open
+      submitForm: { submitted_at: todayInputValue(), submission_method: 'manual' },
       busy: {},
     },
     chat: {
@@ -81,12 +95,12 @@
   };
 
   const STATUS_STYLES = {
-    'Applied': 'bg-amber-100 text-amber-800 ring-amber-600/20',
-    'Interview Scheduled': 'bg-blue-100 text-blue-800 ring-blue-600/20',
-    'Interview Done': 'bg-violet-100 text-violet-800 ring-violet-600/20',
-    'Offer': 'bg-emerald-100 text-emerald-800 ring-emerald-600/20',
-    'Rejected': 'bg-rose-100 text-rose-800 ring-rose-600/20',
-    'Ghosted': 'bg-zinc-200 text-zinc-600 ring-zinc-600/10',
+    'Applied': 'bg-ember-500/15 text-ember-300 ring-ember-500/40',
+    'Interview Scheduled': 'bg-ember-500/20 text-ember-200 ring-ember-400/50',
+    'Interview Done': 'bg-volt-500/15 text-volt-300 ring-volt-500/40',
+    'Offer': 'bg-volt-500/25 text-volt-200 ring-volt-400/60',
+    'Rejected': 'bg-rose-500/15 text-rose-300 ring-rose-500/40',
+    'Ghosted': 'bg-ink-700/60 text-ink-400 ring-ink-500/30',
   };
   const STATUS_OPTIONS = ['Applied', 'Interview Scheduled', 'Interview Done', 'Offer', 'Rejected', 'Ghosted'];
   const DOC_LABELS = {
@@ -94,9 +108,9 @@
     cover_letter_latex: 'Cover Letter (LaTeX)', cover_letter_pdf: 'Cover Letter (PDF)',
   };
   const INTENT_STYLES = {
-    interview_invite: 'bg-blue-100 text-blue-700', rejection: 'bg-rose-100 text-rose-700',
-    offer: 'bg-emerald-100 text-emerald-700', follow_up: 'bg-amber-100 text-amber-700',
-    submission_confirmation: 'bg-violet-100 text-violet-700', unknown: 'bg-zinc-100 text-zinc-500',
+    interview_invite: 'bg-ember-500/15 text-ember-300', rejection: 'bg-rose-500/15 text-rose-300',
+    offer: 'bg-volt-500/20 text-volt-300', follow_up: 'bg-ember-500/10 text-ember-400',
+    submission_confirmation: 'bg-volt-500/10 text-volt-400', unknown: 'bg-ink-700/60 text-ink-400',
   };
 
   // ---------------------------------------------------------------------
@@ -247,6 +261,18 @@
   // ---------------------------------------------------------------------
   // Prepare view actions
   // ---------------------------------------------------------------------
+  function prepareMaxStep() {
+    const p = state.prepare;
+    if (!p.resumeId) return 0;
+    if (!p.jobId) return 1;
+    return 3;
+  }
+  function goToStep(n) {
+    const max = prepareMaxStep();
+    state.prepare.step = Math.min(Math.max(n, 0), max);
+    render();
+  }
+
   async function loadPrepDocuments() {
     const { resumeId, jobId } = state.prepare;
     if (!resumeId || !jobId) { state.prepare.documents = []; return; }
@@ -259,11 +285,13 @@
 
   async function selectPrepareResume(id) {
     state.prepare.resumeId = id;
+    if (state.prepare.step === 0) state.prepare.step = 1;
     await loadPrepDocuments();
     render();
   }
   async function selectPrepareJob(id) {
     state.prepare.jobId = id;
+    if (state.prepare.step === 1) state.prepare.step = 2;
     await loadPrepDocuments();
     render();
   }
@@ -278,6 +306,7 @@
       state.resumes.unshift({ id: data.id, filename: data.filename, upload_date: new Date().toISOString() });
       state.prepare.resumeId = data.id;
       state.prepare.showNewResume = false;
+      if (state.prepare.step === 0) state.prepare.step = 1;
       showToast('Resume uploaded');
       await loadPrepDocuments();
       render();
@@ -299,6 +328,7 @@
       state.prepare.jobId = job.id;
       state.prepare.showNewJob = false;
       state.prepare.newJob = { company: '', role: '', raw_text: '', url: '' };
+      if (state.prepare.step === 1) state.prepare.step = 2;
       showToast('Job description saved');
       await loadPrepDocuments();
       render();
@@ -330,8 +360,12 @@
         submission_method: submitForm.submission_method,
         submitted_at: submitForm.submitted_at ? submitForm.submitted_at + 'T00:00:00' : null,
       });
-      showToast('Application created');
-      state.prepare = { resumeId: null, jobId: null, documents: [], showNewResume: false, showNewJob: false, newJob: { company: '', role: '', raw_text: '', url: '' }, submitForm: null, busy: {} };
+      showToast('Application deployed 🚀');
+      state.prepare = {
+        step: 0, resumeId: null, jobId: null, documents: [], showNewResume: false, showNewJob: false,
+        newJob: { company: '', role: '', raw_text: '', url: '' },
+        submitForm: { submitted_at: todayInputValue(), submission_method: 'manual' }, busy: {},
+      };
       state.view = 'applications';
       await loadApplications();
       await openApplication(application.id);
@@ -372,23 +406,30 @@
     return `<svg class="spinner ${extra}" width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-opacity="0.25"/><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>`;
   }
 
-  function scoreBadge(score) {
+  function scoreBadge(score, big = false) {
     const pct = Math.round(score * 100);
-    const color = pct >= 70 ? 'text-emerald-700 bg-emerald-50 ring-emerald-600/20' : pct >= 40 ? 'text-amber-700 bg-amber-50 ring-amber-600/20' : 'text-rose-700 bg-rose-50 ring-rose-600/20';
-    return `<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${color}">${pct}% match</span>`;
+    const width = big ? 'w-full' : 'w-28';
+    const height = big ? 'h-3.5' : 'h-2.5';
+    return `
+      <div class="inline-flex items-center gap-2.5 ${width}">
+        <div class="relative ${height} flex-1 overflow-hidden rounded-full bg-ink-800 ring-1 ring-inset ring-ink-600">
+          <div class="h-full rounded-full bg-gradient-to-r from-ember-500 via-ember-400 to-volt-400 shadow-[0_0_10px_-1px_rgba(77,255,160,0.6)] transition-all duration-700 ease-out" style="width:${pct}%"></div>
+        </div>
+        <span class="font-display text-sm font-bold tabular-nums text-ink-100">${pct}%</span>
+      </div>`;
   }
 
   function statusBadge(status) {
-    const cls = STATUS_STYLES[status] || 'bg-zinc-100 text-zinc-600 ring-zinc-600/10';
-    return `<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${cls}">${esc(status)}</span>`;
+    const cls = STATUS_STYLES[status] || 'bg-ink-700 text-ink-400 ring-ink-500/30';
+    return `<span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ring-1 ring-inset ${cls}">${esc(status)}</span>`;
   }
 
   function toastHtml() {
     if (!state.toast) return '';
     const isError = state.toast.kind === 'error';
     return `
-      <div class="fixed bottom-5 left-1/2 -translate-x-1/2 z-[100] anim-fade">
-        <div class="flex items-center gap-2 rounded-xl px-4 py-2.5 shadow-pop text-sm font-medium ${isError ? 'bg-rose-600 text-white' : 'bg-zinc-900 text-white'}">
+      <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] anim-fade">
+        <div class="flex items-center gap-2 rounded-xl border-2 px-5 py-3 text-sm font-bold shadow-[0_8px_32px_-8px_rgba(0,0,0,0.8)] ${isError ? 'border-rose-500/50 bg-rose-950 text-rose-200' : 'border-volt-500/50 bg-ink-900 text-volt-300'}">
           ${esc(state.toast.message)}
         </div>
       </div>`;
@@ -398,13 +439,14 @@
     const c = state.confirmDialog;
     if (!c) return '';
     return `
-      <div class="fixed inset-0 z-[110] flex items-center justify-center bg-zinc-900/40 anim-fade" data-action="dismiss-confirm">
-        <div class="w-full max-w-sm rounded-2xl bg-white p-5 shadow-pop" data-stop>
-          <h3 class="text-base font-semibold text-zinc-900">${esc(c.title)}</h3>
-          <p class="mt-1.5 text-sm text-zinc-500">${esc(c.message)}</p>
-          <div class="mt-4 flex justify-end gap-2">
-            <button class="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100" data-action="dismiss-confirm">Cancel</button>
-            <button class="rounded-lg px-3 py-1.5 text-sm font-medium text-white ${c.danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-brand-600 hover:bg-brand-700'}" data-action="run-confirm">${esc(c.confirmLabel || 'Confirm')}</button>
+      <div class="fixed inset-0 z-[110] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/70 anim-fade" data-action="dismiss-confirm"></div>
+        <div class="relative w-full max-w-sm rounded-2xl border-2 ${c.danger ? 'border-rose-500/50' : 'border-ember-500/50'} bg-ink-900 p-6 anim-fade">
+          <h3 class="font-display text-lg font-bold text-ink-50">${esc(c.title)}</h3>
+          <p class="mt-2 text-sm text-ink-400">${esc(c.message)}</p>
+          <div class="mt-5 flex justify-end gap-2">
+            <button class="rounded-xl px-4 py-2 text-sm font-bold text-ink-400 hover:bg-ink-800" data-action="dismiss-confirm">Cancel</button>
+            <button class="rounded-xl px-4 py-2 text-sm font-bold text-ink-950 ${c.danger ? 'bg-rose-500 hover:bg-rose-400' : 'bg-ember-500 hover:bg-ember-400'}" data-action="run-confirm">${esc(c.confirmLabel || 'Confirm')}</button>
           </div>
         </div>
       </div>`;
@@ -414,31 +456,33 @@
   // Render: navbar
   // ---------------------------------------------------------------------
   function navbarHtml() {
-    const dot = state.health && state.health.status === 'ok' ? 'bg-emerald-500' : 'bg-rose-500';
+    const dot = state.health && state.health.status === 'ok'
+      ? 'bg-volt-500 shadow-[0_0_8px_rgba(34,224,122,0.8)]'
+      : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]';
     return `
-      <header class="sticky top-0 z-30 border-b border-zinc-200/80 bg-[#f7f6f3]/90 backdrop-blur-sm">
-        <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <div class="flex items-center gap-2.5">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white font-bold text-sm">J</div>
+      <header class="sticky top-0 z-30 border-b border-ink-700 bg-ink-950/90 backdrop-blur-sm">
+        <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6">
+          <div class="flex items-center gap-3">
+            <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-ember-500 to-ember-600 font-display text-lg font-extrabold text-ink-950 shadow-[0_0_20px_-4px_rgba(255,122,26,0.7)]">J</div>
             <div>
-              <div class="text-sm font-bold leading-tight text-zinc-900">JAM</div>
-              <div class="text-[11px] leading-tight text-zinc-400">Job Application Manager</div>
+              <div class="font-display text-lg font-bold leading-tight tracking-wide text-ink-50">JAM</div>
+              <div class="text-[11px] leading-tight text-ink-500">Job Application Manager</div>
             </div>
           </div>
-          <nav class="flex items-center gap-1 rounded-full bg-zinc-100 p-1">
+          <nav class="flex items-center gap-1 rounded-full border border-ink-700 bg-ink-900 p-1">
             ${tabButton('applications', 'Applications')}
             ${tabButton('prepare', 'Prepare')}
           </nav>
-          <div class="flex items-center gap-2 text-xs text-zinc-400" title="System health">
-            <span class="h-2 w-2 rounded-full ${dot}"></span>
-            <span class="hidden sm:inline">${state.health ? esc(state.health.status) : '…'}</span>
+          <div class="flex items-center gap-2 text-xs text-ink-500" title="System health">
+            <span class="h-2.5 w-2.5 rounded-full ${dot}"></span>
+            <span class="hidden uppercase tracking-wide sm:inline">${state.health ? esc(state.health.status) : '…'}</span>
           </div>
         </div>
       </header>`;
   }
   function tabButton(id, label) {
     const active = state.view === id;
-    return `<button class="rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${active ? 'bg-white text-zinc-900 shadow-card' : 'text-zinc-500 hover:text-zinc-800'}" data-action="set-view" data-view="${id}">${label}</button>`;
+    return `<button class="rounded-full px-4 py-1.5 text-sm font-bold uppercase tracking-wide transition-all ${active ? 'bg-ember-500 text-ink-950 shadow-[0_0_16px_-4px_rgba(255,122,26,0.7)]' : 'text-ink-400 hover:text-ink-100'}" data-action="set-view" data-view="${id}">${label}</button>`;
   }
 
   // ---------------------------------------------------------------------
@@ -447,44 +491,44 @@
   function applicationsViewHtml() {
     const cards = state.applications.map(applicationCardHtml).join('');
     const empty = `
-      <div class="col-span-full flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-300 bg-white/50 py-16 text-center">
-        <div class="text-3xl">📭</div>
-        <p class="mt-3 text-sm font-medium text-zinc-600">No applications yet</p>
-        <p class="mt-1 text-sm text-zinc-400">Prepare a resume + job description, generate your documents, then mark it as submitted.</p>
-        <button class="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700" data-action="set-view" data-view="prepare">Go to Prepare</button>
+      <div class="col-span-full flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-ink-700 bg-ink-900/40 py-20 text-center">
+        <div class="text-4xl">📭</div>
+        <p class="mt-3 font-display text-lg font-bold text-ink-200">No applications yet</p>
+        <p class="mt-1 text-sm text-ink-500">Prepare a resume + job description, generate your documents, then deploy.</p>
+        <button class="mt-5 rounded-xl bg-ember-500 px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-ink-950 shadow-[0_0_20px_-4px_rgba(255,122,26,0.6)] hover:bg-ember-400" data-action="set-view" data-view="prepare">Go to Prepare</button>
       </div>`;
     return `
-      <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+      <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         ${toolbarHtml()}
-        <div class="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
           ${state.loading.applications ? loadingGridHtml() : (cards || empty)}
         </div>
       </div>`;
   }
 
   function loadingGridHtml() {
-    return Array.from({ length: 3 }).map(() => `<div class="h-40 animate-pulse rounded-2xl bg-zinc-200/60"></div>`).join('');
+    return Array.from({ length: 4 }).map(() => `<div class="h-48 animate-pulse rounded-2xl bg-ink-800/60"></div>`).join('');
   }
 
   function toolbarHtml() {
     return `
-      <div class="flex flex-wrap items-center gap-2.5 rounded-2xl bg-white p-3 shadow-card">
-        <select class="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-700 focus:border-brand-400 focus:outline-none" data-bind="filter-status">
+      <div class="flex flex-wrap items-center gap-3 rounded-2xl border-2 border-ink-700 bg-ink-800/60 p-4">
+        <select class="rounded-xl border border-ink-600 bg-ink-900 px-3 py-2 text-sm text-ink-200 focus:border-ember-400 focus:outline-none" data-bind="filter-status">
           <option value="">All statuses</option>
           ${STATUS_OPTIONS.map(s => `<option value="${s}" ${state.filters.status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
         <input type="text" placeholder="Filter by company…" value="${esc(state.filters.company)}"
-          class="w-40 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-700 placeholder:text-zinc-400 focus:border-brand-400 focus:outline-none"
+          class="w-40 rounded-xl border border-ink-600 bg-ink-900 px-3 py-2 text-sm text-ink-200 placeholder:text-ink-500 focus:border-ember-400 focus:outline-none"
           data-bind="filter-company" />
-        <div class="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5">
-          <span class="text-xs text-zinc-400">Min score</span>
+        <div class="flex items-center gap-1.5 rounded-xl border border-ink-600 bg-ink-900 px-3 py-2">
+          <span class="text-xs text-ink-500">Min score</span>
           <input type="number" min="0" max="100" step="5" placeholder="0" value="${esc(state.filters.minScore)}"
-            class="w-12 bg-transparent text-sm text-zinc-700 focus:outline-none" data-bind="filter-minscore" />
-          <span class="text-xs text-zinc-400">%</span>
+            class="w-12 bg-transparent text-sm text-ink-200 focus:outline-none" data-bind="filter-minscore" />
+          <span class="text-xs text-ink-500">%</span>
         </div>
         <div class="ml-auto flex items-center gap-2">
-          <input type="number" min="1" max="90" value="${esc(state.syncDays)}" class="w-16 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-sm text-zinc-700 focus:outline-none" data-bind="sync-days" title="Days to look back" />
-          <button class="flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60" data-action="sync-gmail" ${state.loading.sync ? 'disabled' : ''}>
+          <input type="number" min="1" max="90" value="${esc(state.syncDays)}" class="w-16 rounded-xl border border-ink-600 bg-ink-900 px-2 py-2 text-sm text-ink-200 focus:outline-none" data-bind="sync-days" title="Days to look back" />
+          <button class="flex items-center gap-1.5 rounded-xl bg-volt-500 px-4 py-2 text-sm font-bold uppercase tracking-wide text-ink-950 shadow-[0_0_16px_-4px_rgba(34,224,122,0.6)] hover:bg-volt-400 disabled:opacity-60" data-action="sync-gmail" ${state.loading.sync ? 'disabled' : ''}>
             ${state.loading.sync ? iconSpinner() : '✉️'} Sync Gmail
           </button>
         </div>
@@ -496,19 +540,21 @@
     const company = job ? job.company : `Job #${app.job_id}`;
     const role = job ? job.role : '—';
     return `
-      <div class="cursor-pointer rounded-2xl bg-white p-4 shadow-card transition-shadow hover:shadow-pop" data-action="open-application" data-id="${app.id}">
-        <div class="flex items-start justify-between gap-2">
+      <div class="anim-fade group cursor-pointer rounded-2xl border-2 border-ink-700 bg-ink-800/60 p-6 transition-all hover:-translate-y-1 hover:border-ember-500/60 hover:shadow-[0_0_32px_-8px_rgba(255,122,26,0.4)]" data-action="open-application" data-id="${app.id}">
+        <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <div class="truncate text-sm font-semibold text-zinc-900">${esc(role)}</div>
-            <div class="truncate text-sm text-zinc-500">${esc(company)}</div>
+            <div class="truncate font-display text-xl font-bold text-ink-50">${esc(role)}</div>
+            <div class="truncate text-sm text-ink-400">${esc(company)}</div>
           </div>
           ${statusBadge(app.status)}
         </div>
-        <div class="mt-4 flex items-center justify-between">
-          <span class="text-xs text-zinc-400">Applied ${fmtDate(app.submitted_at)}</span>
-          ${app.match_score != null ? scoreBadge(app.match_score) : '<span class="text-xs text-zinc-300">No score yet</span>'}
+        <div class="mt-5">
+          ${app.match_score != null ? scoreBadge(app.match_score, true) : '<span class="text-xs text-ink-500">No score yet</span>'}
         </div>
-        ${app.confirmed_at ? `<div class="mt-2 text-xs font-medium text-brand-600">✓ Confirmed via ${esc(app.confirmation_source)}</div>` : ''}
+        <div class="mt-4 flex items-center justify-between text-xs text-ink-500">
+          <span>Applied ${fmtDate(app.submitted_at)}</span>
+          ${app.confirmed_at ? `<span class="font-bold text-volt-400">✓ Confirmed</span>` : ''}
+        </div>
       </div>`;
   }
 
@@ -523,63 +569,63 @@
 
     const docsHtml = (app.documents || []).length
       ? app.documents.map(documentCardHtml).join('')
-      : `<p class="text-sm text-zinc-400">No documents linked yet.</p>`;
+      : `<p class="text-sm text-ink-500">No documents linked yet.</p>`;
 
     const emailsHtml = emails.length
       ? emails.map(emailEventHtml).join('')
-      : `<p class="text-sm text-zinc-400">No synced emails yet. Try "Sync Gmail" from the Applications toolbar.</p>`;
+      : `<p class="text-sm text-ink-500">No synced emails yet. Try "Sync Gmail" from the Applications toolbar.</p>`;
 
     return `
       <div class="fixed inset-0 z-40 flex justify-end">
-        <div class="absolute inset-0 bg-zinc-900/30 anim-fade" data-action="close-detail"></div>
-        <div class="anim-slide relative flex h-full w-full max-w-lg flex-col bg-[#faf9f6] shadow-panel">
-          <div class="flex items-start justify-between border-b border-zinc-200 px-5 py-4">
+        <div class="absolute inset-0 bg-black/60 anim-fade" data-action="close-detail"></div>
+        <div class="anim-slide relative flex h-full w-full max-w-lg flex-col border-l-2 border-ink-700 bg-ink-950 shadow-[-16px_0_48px_-12px_rgba(0,0,0,0.8)]">
+          <div class="flex items-start justify-between border-b border-ink-700 px-6 py-5">
             <div class="min-w-0">
-              <div class="text-base font-bold text-zinc-900">${esc(job ? job.role : 'Unknown role')}</div>
-              <div class="text-sm text-zinc-500">${esc(job ? job.company : '')} · resume: ${esc(resume ? resume.filename : app.resume_id)}</div>
+              <div class="font-display text-xl font-bold text-ink-50">${esc(job ? job.role : 'Unknown role')}</div>
+              <div class="text-sm text-ink-400">${esc(job ? job.company : '')} · ${esc(resume ? resume.filename : 'resume #' + app.resume_id)}</div>
             </div>
-            <button class="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-700" data-action="close-detail">✕</button>
+            <button class="rounded-lg p-2 text-ink-500 hover:bg-ink-800 hover:text-ink-100" data-action="close-detail">✕</button>
           </div>
 
-          <div class="flex-1 overflow-y-auto px-5 py-4 space-y-6">
-            <section class="rounded-2xl bg-white p-4 shadow-card">
+          <div class="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+            <section class="rounded-2xl border-2 border-ink-700 bg-ink-900/60 p-5">
               <div class="flex flex-wrap items-center gap-3">
-                <label class="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</label>
-                <select class="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm font-medium focus:border-brand-400 focus:outline-none" data-action="update-status" data-id="${app.id}">
+                <label class="text-xs font-bold uppercase tracking-wide text-ink-500">Status</label>
+                <select class="rounded-xl border border-ink-600 bg-ink-900 px-3 py-2 text-sm font-semibold text-ink-100 focus:border-ember-400 focus:outline-none" data-action="update-status" data-id="${app.id}">
                   ${STATUS_OPTIONS.map(s => `<option value="${s}" ${app.status === s ? 'selected' : ''}>${s}</option>`).join('')}
                 </select>
-                ${app.match_score != null ? scoreBadge(app.match_score) : ''}
               </div>
-              <dl class="mt-3 grid grid-cols-2 gap-2 text-xs text-zinc-500">
-                <div><dt class="text-zinc-400">Submitted</dt><dd class="font-medium text-zinc-700">${fmtDate(app.submitted_at)}</dd></div>
-                <div><dt class="text-zinc-400">Method</dt><dd class="font-medium text-zinc-700">${esc(app.submission_method)}</dd></div>
+              ${app.match_score != null ? `<div class="mt-3">${scoreBadge(app.match_score, true)}</div>` : ''}
+              <dl class="mt-4 grid grid-cols-2 gap-3 text-xs text-ink-500">
+                <div><dt>Submitted</dt><dd class="mt-0.5 font-semibold text-ink-200">${fmtDate(app.submitted_at)}</dd></div>
+                <div><dt>Method</dt><dd class="mt-0.5 font-semibold text-ink-200">${esc(app.submission_method)}</dd></div>
               </dl>
 
-              <div class="mt-3 border-t border-zinc-100 pt-3">
+              <div class="mt-4 border-t border-ink-700 pt-4">
                 ${app.confirmed_at
-                  ? `<div class="flex items-center gap-1.5 text-sm font-medium text-brand-700">✓ Confirmed via ${esc(app.confirmation_source)} on ${fmtDate(app.confirmed_at)}</div>`
-                  : `<button class="rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 hover:bg-brand-100" data-action="confirm-manually" data-id="${app.id}">Confirm submission manually</button>`}
+                  ? `<div class="flex items-center gap-1.5 text-sm font-bold text-volt-400">✓ Confirmed via ${esc(app.confirmation_source)} on ${fmtDate(app.confirmed_at)}</div>`
+                  : `<button class="rounded-xl bg-volt-500/15 px-4 py-2 text-sm font-bold text-volt-300 ring-1 ring-inset ring-volt-500/40 hover:bg-volt-500/25" data-action="confirm-manually" data-id="${app.id}">Confirm submission manually</button>`}
               </div>
 
-              <div class="mt-3 border-t border-zinc-100 pt-3">
-                <label class="text-xs font-semibold uppercase tracking-wide text-zinc-400">Notes</label>
-                <textarea rows="3" class="mt-1.5 w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-sm focus:border-brand-400 focus:outline-none" data-bind="notes-draft" placeholder="Add a note…">${esc(notesDraft)}</textarea>
-                <button class="mt-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800" data-action="save-notes" data-id="${app.id}">Save notes</button>
+              <div class="mt-4 border-t border-ink-700 pt-4">
+                <label class="text-xs font-bold uppercase tracking-wide text-ink-500">Notes</label>
+                <textarea rows="3" class="mt-2 w-full resize-none rounded-xl border border-ink-600 bg-ink-900 p-3 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ember-400 focus:outline-none" data-bind="notes-draft" placeholder="Add a note…">${esc(notesDraft)}</textarea>
+                <button class="mt-2 rounded-xl bg-ink-800 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-ink-200 hover:bg-ink-700" data-action="save-notes" data-id="${app.id}">Save notes</button>
               </div>
             </section>
 
             <section>
-              <h4 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Documents</h4>
+              <h4 class="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-ember-400">Documents</h4>
               <div class="space-y-2">${docsHtml}</div>
             </section>
 
             <section>
-              <h4 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Email activity</h4>
+              <h4 class="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-volt-400">Email activity</h4>
               <div class="space-y-2">${emailsHtml}</div>
             </section>
 
-            <section class="border-t border-zinc-200 pt-4">
-              <button class="w-full rounded-lg border border-rose-200 bg-rose-50 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-100" data-action="delete-application" data-id="${app.id}">Delete application</button>
+            <section class="border-t border-ink-700 pt-5">
+              <button class="w-full rounded-xl border border-rose-500/40 bg-rose-500/10 py-2.5 text-sm font-bold uppercase tracking-wide text-rose-300 hover:bg-rose-500/20" data-action="delete-application" data-id="${app.id}">Delete application</button>
             </section>
           </div>
         </div>
@@ -590,159 +636,215 @@
     const label = DOC_LABELS[doc.doc_type] || doc.doc_type;
     const url = fileUrl(doc.file_path);
     return `
-      <div class="rounded-xl border border-zinc-200 bg-white p-3">
-        <div class="flex items-center justify-between">
-          <span class="text-sm font-semibold text-zinc-800">${esc(label)}</span>
-          <div class="flex items-center gap-2">
+      <div class="rounded-xl border border-ink-700 bg-ink-900/60 p-4">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm font-bold text-ink-100">${esc(label)}</span>
+          <div class="flex items-center gap-3">
             ${doc.match_score != null ? scoreBadge(doc.match_score) : ''}
-            ${url ? `<a class="text-xs font-semibold text-brand-600 hover:underline" href="${esc(url)}" target="_blank" rel="noopener">Download ↗</a>` : ''}
+            ${url ? `<a class="text-xs font-bold text-ember-400 hover:text-ember-300" href="${esc(url)}" target="_blank" rel="noopener">Download ↗</a>` : ''}
           </div>
         </div>
         ${doc.content_text ? `
-          <details class="mt-1.5">
-            <summary class="text-xs font-medium text-zinc-400 hover:text-zinc-600">View source</summary>
-            <pre class="latex-pre mt-1.5 max-h-48 overflow-y-auto rounded-lg bg-zinc-50 p-2 text-[11px] text-zinc-600">${esc(doc.content_text)}</pre>
+          <details class="mt-2">
+            <summary class="text-xs font-semibold text-ink-500 hover:text-ink-300">View source</summary>
+            <pre class="latex-pre mt-2 max-h-48 overflow-y-auto rounded-lg bg-black/40 p-3 text-[11px] text-ink-400">${esc(doc.content_text)}</pre>
           </details>` : ''}
-        <div class="mt-1 text-[11px] text-zinc-400">${fmtDate(doc.created_at)}</div>
+        <div class="mt-2 text-[11px] text-ink-600">${fmtDate(doc.created_at)}</div>
       </div>`;
   }
 
   function emailEventHtml(ev) {
     const intentCls = INTENT_STYLES[ev.detected_intent] || INTENT_STYLES.unknown;
     return `
-      <div class="rounded-xl border border-zinc-200 bg-white p-3">
+      <div class="rounded-xl border border-ink-700 bg-ink-900/60 p-4">
         <div class="flex items-center justify-between gap-2">
-          <span class="truncate text-sm font-medium text-zinc-800">${esc(ev.subject || '(no subject)')}</span>
-          <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${intentCls}">${esc((ev.detected_intent || 'unknown').replace('_', ' '))}</span>
+          <span class="truncate text-sm font-semibold text-ink-100">${esc(ev.subject || '(no subject)')}</span>
+          <span class="shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${intentCls}">${esc((ev.detected_intent || 'unknown').replace('_', ' '))}</span>
         </div>
-        <p class="mt-1 line-clamp-2 text-xs text-zinc-500">${esc(ev.snippet || '')}</p>
-        <div class="mt-1.5 flex items-center justify-between text-[11px] text-zinc-400">
+        <p class="mt-1.5 line-clamp-2 text-xs text-ink-500">${esc(ev.snippet || '')}</p>
+        <div class="mt-2 flex items-center justify-between text-[11px] text-ink-600">
           <span>${fmtDateTime(ev.received_at)}</span>
-          ${ev.status_change ? `<span class="font-semibold text-brand-600">→ ${esc(ev.status_change)}</span>` : ''}
+          ${ev.status_change ? `<span class="font-bold text-ember-400">→ ${esc(ev.status_change)}</span>` : ''}
         </div>
       </div>`;
   }
 
   // ---------------------------------------------------------------------
-  // Render: Prepare view
+  // Render: Prepare view (sliding step-wizard)
   // ---------------------------------------------------------------------
   function prepareViewHtml() {
-    const p = state.prepare;
+    const step = state.prepare.step;
     return `
-      <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          ${prepareResumeColumnHtml()}
-          ${prepareJobColumnHtml()}
+      <div class="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+        <div class="mb-2 text-center">
+          <div class="font-display text-3xl font-bold uppercase tracking-wide text-ink-50 sm:text-4xl">Mission Prep</div>
+          <p class="mt-1 text-sm text-ink-400">Assemble your loadout, then deploy the application.</p>
         </div>
-        ${p.resumeId && p.jobId ? prepareActionsHtml() : `
-          <div class="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-white/50 p-6 text-center text-sm text-zinc-400">
-            Select (or add) a resume and a job description above to generate documents.
-          </div>`}
+        ${stepRailHtml()}
+        <div class="relative overflow-hidden rounded-3xl border-2 border-ink-700 bg-gradient-to-b from-ink-900 to-ink-950 shadow-[0_0_60px_-20px_rgba(255,122,26,0.18)]">
+          <div class="flex" style="width:400%; transform: translateX(-${step * 25}%); transition: transform .5s cubic-bezier(.16,1,.3,1);">
+            <div style="width:25%" class="p-6 sm:p-10">${stepResumeHtml()}</div>
+            <div style="width:25%" class="p-6 sm:p-10">${stepJobHtml()}</div>
+            <div style="width:25%" class="p-6 sm:p-10">${stepGenerateHtml()}</div>
+            <div style="width:25%" class="p-6 sm:p-10">${stepDeployHtml()}</div>
+          </div>
+        </div>
       </div>`;
   }
 
-  function prepareResumeColumnHtml() {
-    const p = state.prepare;
-    const items = state.resumes.map(r => `
-      <button class="w-full rounded-xl border p-3 text-left transition-colors ${p.resumeId === r.id ? 'border-brand-400 bg-brand-50' : 'border-zinc-200 bg-white hover:border-zinc-300'}" data-action="select-resume" data-id="${r.id}">
-        <div class="text-sm font-medium text-zinc-800">${esc(r.filename)}</div>
-        <div class="text-xs text-zinc-400">Uploaded ${fmtDate(r.upload_date)}</div>
-      </button>`).join('');
+  function stepRailHtml() {
+    const labels = ['Resume', 'Job Intel', 'Arsenal', 'Deploy'];
+    const max = prepareMaxStep();
+    const current = state.prepare.step;
     return `
-      <div class="rounded-2xl bg-white p-4 shadow-card">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-semibold text-zinc-800">1. Resume</h3>
-          <button class="text-xs font-semibold text-brand-600 hover:underline" data-action="toggle-new-resume">${p.showNewResume ? 'Cancel' : '+ Upload new'}</button>
-        </div>
-        <div class="mt-3 space-y-2 max-h-56 overflow-y-auto">
-          ${items || `<p class="text-sm text-zinc-400">No resumes uploaded yet.</p>`}
+      <div class="mb-6 flex items-center justify-center gap-1.5 sm:gap-3">
+        ${labels.map((label, i) => `
+          <button class="group flex items-center gap-2 ${i > max ? 'cursor-not-allowed opacity-40' : ''}" data-action="go-step" data-step="${i}" ${i > max ? 'disabled' : ''}>
+            <span class="flex h-9 w-9 items-center justify-center rounded-full border-2 font-display text-sm font-bold transition-all
+              ${i === current ? 'border-ember-400 bg-ember-500/20 text-ember-300 shadow-[0_0_16px_-2px_rgba(255,122,26,0.6)]'
+                : i < current ? 'border-volt-500 bg-volt-500/10 text-volt-300'
+                : i <= max ? 'border-ink-500 text-ink-300' : 'border-ink-700 text-ink-600'}">
+              ${i < current ? '✓' : i + 1}
+            </span>
+            <span class="hidden text-xs font-bold uppercase tracking-wider sm:inline ${i === current ? 'text-ember-300' : 'text-ink-500'}">${label}</span>
+          </button>
+          ${i < labels.length - 1 ? `<span class="h-0.5 w-6 rounded sm:w-10 ${i < max ? 'bg-volt-500/50' : 'bg-ink-700'}"></span>` : ''}
+        `).join('')}
+      </div>`;
+  }
+
+  function stepResumeHtml() {
+    const p = state.prepare;
+    const tiles = state.resumes.map(r => `
+      <button class="group relative flex flex-col items-start gap-2 rounded-2xl border-2 p-5 text-left transition-all ${p.resumeId === r.id ? 'border-ember-400 bg-ember-500/10 shadow-[0_0_24px_-4px_rgba(255,122,26,0.5)]' : 'border-ink-700 bg-ink-800/60 hover:border-ink-500'}" data-action="select-resume" data-id="${r.id}">
+        ${p.resumeId === r.id ? `<span class="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-ember-500 text-xs font-bold text-ink-950">✓</span>` : ''}
+        <span class="text-3xl">📄</span>
+        <span class="font-display text-lg font-bold text-ink-50">${esc(r.filename)}</span>
+        <span class="text-xs text-ink-400">Uploaded ${fmtDate(r.upload_date)}</span>
+      </button>`).join('');
+    const uploadTile = `
+      <button class="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-ink-600 p-5 text-ink-400 transition-all hover:border-volt-400 hover:text-volt-300" data-action="toggle-new-resume">
+        <span class="text-3xl">+</span>
+        <span class="font-display text-sm font-bold uppercase tracking-wide">Upload New</span>
+      </button>`;
+    return `
+      <div>
+        <h3 class="font-display text-xs font-bold uppercase tracking-[0.25em] text-ember-400">Step 1 // Loadout</h3>
+        <h2 class="mt-1 text-2xl font-bold text-ink-50">Choose Your Resume</h2>
+        <div class="mt-6 grid max-h-[320px] grid-cols-1 gap-4 overflow-y-auto pr-1 sm:grid-cols-2">
+          ${tiles}${uploadTile}
         </div>
         ${p.showNewResume ? `
-          <div class="mt-3 border-t border-zinc-100 pt-3">
-            <input type="file" accept="application/pdf" class="block w-full text-sm text-zinc-600" id="resume-file-input" />
-            <button class="mt-2 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800" data-action="upload-resume">Upload PDF</button>
+          <div class="mt-4 rounded-2xl border-2 border-volt-500/40 bg-volt-500/5 p-4">
+            <input type="file" accept="application/pdf" class="block w-full text-sm text-ink-300 file:mr-3 file:rounded-lg file:border-0 file:bg-volt-500 file:px-3 file:py-1.5 file:text-sm file:font-bold file:text-ink-950" id="resume-file-input" />
+            <button class="mt-3 rounded-xl bg-volt-500 px-4 py-2 text-sm font-bold text-ink-950 hover:bg-volt-400" data-action="upload-resume">Confirm Upload</button>
           </div>` : ''}
+        <div class="mt-6 flex justify-end">
+          <button class="rounded-xl bg-ember-500 px-6 py-2.5 font-display font-bold uppercase tracking-wide text-ink-950 shadow-[0_0_20px_-4px_rgba(255,122,26,0.6)] hover:bg-ember-400 disabled:opacity-30 disabled:shadow-none" data-action="go-step" data-step="1" ${!p.resumeId ? 'disabled' : ''}>Continue →</button>
+        </div>
       </div>`;
   }
 
-  function prepareJobColumnHtml() {
+  function stepJobHtml() {
     const p = state.prepare;
-    const items = state.jobs.map(j => `
-      <button class="w-full rounded-xl border p-3 text-left transition-colors ${p.jobId === j.id ? 'border-brand-400 bg-brand-50' : 'border-zinc-200 bg-white hover:border-zinc-300'}" data-action="select-job" data-id="${j.id}">
-        <div class="text-sm font-medium text-zinc-800">${esc(j.role)}</div>
-        <div class="text-xs text-zinc-400">${esc(j.company)} · ${fmtDate(j.upload_date)}</div>
+    const tiles = state.jobs.map(j => `
+      <button class="group relative flex flex-col items-start gap-2 rounded-2xl border-2 p-5 text-left transition-all ${p.jobId === j.id ? 'border-volt-400 bg-volt-500/10 shadow-[0_0_24px_-4px_rgba(34,224,122,0.5)]' : 'border-ink-700 bg-ink-800/60 hover:border-ink-500'}" data-action="select-job" data-id="${j.id}">
+        ${p.jobId === j.id ? `<span class="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-volt-500 text-xs font-bold text-ink-950">✓</span>` : ''}
+        <span class="text-3xl">🎯</span>
+        <span class="font-display text-lg font-bold text-ink-50">${esc(j.role)}</span>
+        <span class="text-xs text-ink-400">${esc(j.company)} · ${fmtDate(j.upload_date)}</span>
       </button>`).join('');
+    const addTile = `
+      <button class="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-ink-600 p-5 text-ink-400 transition-all hover:border-ember-400 hover:text-ember-300" data-action="toggle-new-job">
+        <span class="text-3xl">+</span>
+        <span class="font-display text-sm font-bold uppercase tracking-wide">Add Target</span>
+      </button>`;
     const nj = p.newJob;
     return `
-      <div class="rounded-2xl bg-white p-4 shadow-card">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-semibold text-zinc-800">2. Job description</h3>
-          <button class="text-xs font-semibold text-brand-600 hover:underline" data-action="toggle-new-job">${p.showNewJob ? 'Cancel' : '+ Add new'}</button>
-        </div>
-        <div class="mt-3 space-y-2 max-h-56 overflow-y-auto">
-          ${items || `<p class="text-sm text-zinc-400">No job descriptions saved yet.</p>`}
+      <div>
+        <h3 class="font-display text-xs font-bold uppercase tracking-[0.25em] text-volt-400">Step 2 // Intel</h3>
+        <h2 class="mt-1 text-2xl font-bold text-ink-50">Scout the Job</h2>
+        <div class="mt-6 grid max-h-[280px] grid-cols-1 gap-4 overflow-y-auto pr-1 sm:grid-cols-2">
+          ${tiles}${addTile}
         </div>
         ${p.showNewJob ? `
-          <div class="mt-3 space-y-2 border-t border-zinc-100 pt-3">
-            <div class="flex gap-2">
-              <input class="w-1/2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none" placeholder="Company" value="${esc(nj.company)}" data-bind="new-job-company" />
-              <input class="w-1/2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none" placeholder="Role" value="${esc(nj.role)}" data-bind="new-job-role" />
+          <div class="mt-4 space-y-3 rounded-2xl border-2 border-ember-500/40 bg-ember-500/5 p-4">
+            <div class="flex gap-3">
+              <input class="w-1/2 rounded-xl border border-ink-600 bg-ink-900 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ember-400 focus:outline-none" placeholder="Company" value="${esc(nj.company)}" data-bind="new-job-company" />
+              <input class="w-1/2 rounded-xl border border-ink-600 bg-ink-900 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ember-400 focus:outline-none" placeholder="Role" value="${esc(nj.role)}" data-bind="new-job-role" />
             </div>
-            <textarea rows="4" class="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-sm focus:border-brand-400 focus:outline-none" placeholder="Paste the job description text…" data-bind="new-job-text">${esc(nj.raw_text)}</textarea>
-            <input class="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none" placeholder="Posting URL (optional)" value="${esc(nj.url)}" data-bind="new-job-url" />
-            <button class="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800" data-action="save-new-job">Save job description</button>
+            <textarea rows="4" class="w-full resize-none rounded-xl border border-ink-600 bg-ink-900 p-3 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ember-400 focus:outline-none" placeholder="Paste the job description text…" data-bind="new-job-text">${esc(nj.raw_text)}</textarea>
+            <input class="w-full rounded-xl border border-ink-600 bg-ink-900 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ember-400 focus:outline-none" placeholder="Posting URL (optional)" value="${esc(nj.url)}" data-bind="new-job-url" />
+            <button class="rounded-xl bg-ember-500 px-4 py-2 text-sm font-bold text-ink-950 hover:bg-ember-400" data-action="save-new-job">Save Target</button>
           </div>` : ''}
+        <div class="mt-6 flex justify-between">
+          <button class="rounded-xl border border-ink-600 px-6 py-2.5 font-display font-bold uppercase tracking-wide text-ink-300 hover:border-ink-400" data-action="go-step" data-step="0">← Back</button>
+          <button class="rounded-xl bg-volt-500 px-6 py-2.5 font-display font-bold uppercase tracking-wide text-ink-950 shadow-[0_0_20px_-4px_rgba(34,224,122,0.6)] hover:bg-volt-400 disabled:opacity-30 disabled:shadow-none" data-action="go-step" data-step="2" ${!p.jobId ? 'disabled' : ''}>Continue →</button>
+        </div>
       </div>`;
   }
 
-  function prepareActionsHtml() {
+  function stepGenerateHtml() {
     const p = state.prepare;
     const docs = p.documents;
     const has = t => docs.some(d => d.doc_type === t);
-    const genButton = (kind, label, doneTypes) => `
-      <button class="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 shadow-card hover:border-brand-300 hover:text-brand-700 disabled:opacity-60" data-action="run-generation" data-kind="${kind}" ${p.busy[kind] ? 'disabled' : ''}>
-        ${p.busy[kind] ? iconSpinner() : (doneTypes.some(has) ? '↻' : '✨')} ${label}${doneTypes.some(has) ? ' (regenerate)' : ''}
-      </button>`;
-
+    const ability = (kind, icon, title, desc, doneTypes) => {
+      const done = doneTypes.some(has);
+      const busy = p.busy[kind];
+      return `
+        <div class="flex flex-col items-center gap-3 rounded-2xl border-2 p-5 text-center transition-all ${done ? 'border-volt-500/60 bg-volt-500/5' : 'border-ink-700 bg-ink-800/60'}">
+          <div class="flex h-14 w-14 items-center justify-center rounded-full text-2xl ${done ? 'bg-volt-500/20' : 'bg-ink-700'}">${done ? '✅' : icon}</div>
+          <div class="font-display text-base font-bold text-ink-50">${title}</div>
+          <p class="text-xs text-ink-400">${desc}</p>
+          <button class="mt-1 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold uppercase tracking-wide transition-all disabled:opacity-60 ${done ? 'border border-ink-600 text-ink-300 hover:border-ink-400' : 'bg-ember-500 text-ink-950 shadow-[0_0_16px_-4px_rgba(255,122,26,0.6)] hover:bg-ember-400'}" data-action="run-generation" data-kind="${kind}" ${busy ? 'disabled' : ''}>
+            ${busy ? iconSpinner() : ''} ${busy ? 'Working…' : done ? 'Regenerate' : 'Activate'}
+          </button>
+        </div>`;
+    };
     return `
-      <div class="mt-5 rounded-2xl bg-white p-4 shadow-card">
-        <h3 class="text-sm font-semibold text-zinc-800">3. Generate documents</h3>
-        <div class="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-          ${genButton('score', 'Score match', ['score'])}
-          ${genButton('cv', 'Tailor CV', ['cv_pdf', 'cv_latex'])}
-          ${genButton('cover', 'Cover letter', ['cover_letter_pdf', 'cover_letter_latex'])}
+      <div>
+        <h3 class="font-display text-xs font-bold uppercase tracking-[0.25em] text-ember-400">Step 3 // Arsenal</h3>
+        <h2 class="mt-1 text-2xl font-bold text-ink-50">Craft Your Documents</h2>
+        <p class="mt-1 text-xs text-ink-500">Each ability calls a real LLM (and compiles LaTeX for CV/cover letter) — a few seconds to a couple of minutes.</p>
+        <div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          ${ability('score', '🎯', 'Score Match', 'Rate fit vs. the job, 0–100%.', ['score'])}
+          ${ability('cv', '🛡️', 'Tailor CV', 'Rewrite + compile your CV as a PDF.', ['cv_pdf', 'cv_latex'])}
+          ${ability('cover', '📜', 'Cover Letter', 'Draft + compile a cover letter PDF.', ['cover_letter_pdf', 'cover_letter_latex'])}
         </div>
-        <p class="mt-2 text-xs text-zinc-400">Document generation calls a real LLM (and compiles LaTeX for CV/cover letter) — this can take anywhere from a few seconds to a couple of minutes.</p>
-
-        <div class="mt-4 space-y-2">
-          ${docs.length ? docs.map(documentCardHtml).join('') : `<p class="text-sm text-zinc-400">Nothing generated yet for this pair.</p>`}
+        <div class="mt-6 max-h-52 space-y-2 overflow-y-auto pr-1">
+          ${docs.length ? docs.map(documentCardHtml).join('') : `<p class="text-sm text-ink-500">Nothing generated yet — activate an ability above.</p>`}
         </div>
-
-        <div class="mt-5 border-t border-zinc-100 pt-4">
-          ${p.submitForm ? submitFormHtml() : `
-            <button class="w-full rounded-xl bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700" data-action="open-submit-form">Mark as submitted →</button>`}
+        <div class="mt-6 flex justify-between">
+          <button class="rounded-xl border border-ink-600 px-6 py-2.5 font-display font-bold uppercase tracking-wide text-ink-300 hover:border-ink-400" data-action="go-step" data-step="1">← Back</button>
+          <button class="rounded-xl bg-ember-500 px-6 py-2.5 font-display font-bold uppercase tracking-wide text-ink-950 shadow-[0_0_20px_-4px_rgba(255,122,26,0.6)] hover:bg-ember-400" data-action="go-step" data-step="3">Continue →</button>
         </div>
       </div>`;
   }
 
-  function submitFormHtml() {
-    const f = state.prepare.submitForm;
+  function stepDeployHtml() {
+    const p = state.prepare;
+    const job = jobFor(p.jobId);
+    const resume = resumeFor(p.resumeId);
+    const f = p.submitForm;
     return `
-      <div class="rounded-xl border border-brand-200 bg-brand-50 p-3">
-        <h4 class="text-sm font-semibold text-brand-800">Confirm submission details</h4>
-        <div class="mt-2 flex flex-wrap items-center gap-2">
-          <label class="text-xs text-brand-700">Submitted on</label>
-          <input type="date" value="${esc(f.submitted_at)}" class="rounded-lg border border-brand-200 bg-white px-2 py-1 text-sm" data-bind="submit-date" />
-          <label class="text-xs text-brand-700">Method</label>
-          <select class="rounded-lg border border-brand-200 bg-white px-2 py-1 text-sm" data-bind="submit-method">
+      <div class="flex flex-col items-center text-center">
+        <h3 class="font-display text-xs font-bold uppercase tracking-[0.25em] text-volt-400">Step 4 // Deploy</h3>
+        <h2 class="mt-1 text-2xl font-bold text-ink-50">Ready to Submit?</h2>
+        <div class="mt-6 w-full max-w-md rounded-2xl border-2 border-ink-700 bg-ink-800/60 p-5 text-left">
+          <div class="flex items-center gap-3"><span class="text-2xl">🎯</span><div><div class="font-display font-bold text-ink-50">${esc(job ? job.role : '—')}</div><div class="text-xs text-ink-400">${esc(job ? job.company : '')}</div></div></div>
+          <div class="mt-3 flex items-center gap-3 border-t border-ink-700 pt-3"><span class="text-2xl">📄</span><div class="text-sm text-ink-300">${esc(resume ? resume.filename : '—')}</div></div>
+        </div>
+        <div class="mt-5 flex flex-wrap items-center justify-center gap-3 rounded-2xl border-2 border-ink-700 bg-ink-800/40 p-4">
+          <label class="text-xs font-bold uppercase tracking-wide text-ink-400">Submitted on</label>
+          <input type="date" value="${esc(f.submitted_at)}" class="rounded-lg border border-ink-600 bg-ink-900 px-2.5 py-1.5 text-sm text-ink-100" data-bind="submit-date" />
+          <label class="text-xs font-bold uppercase tracking-wide text-ink-400">Method</label>
+          <select class="rounded-lg border border-ink-600 bg-ink-900 px-2.5 py-1.5 text-sm text-ink-100" data-bind="submit-method">
             <option value="manual" ${f.submission_method === 'manual' ? 'selected' : ''}>Manual</option>
             <option value="automatic" ${f.submission_method === 'automatic' ? 'selected' : ''}>Automatic</option>
           </select>
         </div>
-        <div class="mt-3 flex justify-end gap-2">
-          <button class="rounded-lg px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-100" data-action="close-submit-form">Cancel</button>
-          <button class="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700" data-action="confirm-submit">Create application</button>
-        </div>
+        <button class="mt-6 rounded-2xl bg-gradient-to-r from-ember-500 to-volt-500 px-10 py-3.5 font-display text-lg font-extrabold uppercase tracking-wider text-ink-950 shadow-[0_0_32px_-6px_rgba(255,122,26,0.6)] hover:brightness-110" data-action="confirm-submit">🚀 Deploy Application</button>
+        <button class="mt-3 text-xs font-bold text-ink-500 hover:text-ink-300" data-action="go-step" data-step="2">← Back to Arsenal</button>
       </div>`;
   }
 
@@ -753,25 +855,28 @@
     const c = state.chat;
     if (!c.open) {
       return `
-        <button class="fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-2xl text-white shadow-pop hover:bg-brand-700" data-action="toggle-chat" title="Ask JAM">💬</button>`;
+        <button class="fixed bottom-6 right-6 z-50 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-ember-500 to-ember-600 text-2xl shadow-[0_0_32px_-6px_rgba(255,122,26,0.7)] transition-transform hover:scale-105" data-action="toggle-chat" title="Ask JAM">💬</button>`;
     }
     const bubbles = c.messages.map(m => `
       <div class="flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}">
-        <div class="max-w-[85%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap ${m.role === 'user' ? 'bg-brand-600 text-white' : 'bg-zinc-100 text-zinc-800'}">${esc(m.content)}</div>
+        <div class="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap ${m.role === 'user' ? 'bg-ember-500 font-medium text-ink-950' : 'border border-ink-700 bg-ink-800 text-ink-100'}">${esc(m.content)}</div>
       </div>`).join('');
     return `
-      <div class="fixed bottom-5 right-5 z-50 flex h-[520px] w-[360px] max-w-[92vw] flex-col overflow-hidden rounded-2xl bg-white shadow-pop anim-fade">
-        <div class="flex items-center justify-between bg-zinc-900 px-4 py-3">
-          <div class="text-sm font-semibold text-white">JAM Assistant</div>
-          <button class="text-zinc-300 hover:text-white" data-action="toggle-chat">✕</button>
+      <div class="fixed bottom-6 right-6 z-50 flex h-[540px] w-[380px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border-2 border-ink-700 bg-ink-950 shadow-[0_0_60px_-12px_rgba(0,0,0,0.9)] anim-fade">
+        <div class="flex items-center justify-between border-b border-ink-700 bg-gradient-to-r from-ink-900 to-ink-800 px-4 py-3.5">
+          <div class="flex items-center gap-2">
+            <span class="h-2 w-2 rounded-full bg-volt-400 shadow-[0_0_8px_rgba(77,255,160,0.8)]"></span>
+            <span class="font-display text-sm font-bold uppercase tracking-wide text-ink-50">JAM Assistant</span>
+          </div>
+          <button class="text-ink-500 hover:text-ink-100" data-action="toggle-chat">✕</button>
         </div>
-        <div id="chat-scroll" class="flex-1 space-y-2.5 overflow-y-auto p-3.5">
-          ${bubbles || `<p class="text-center text-xs text-zinc-400 mt-6">Ask about your applications, or say "score my resume against job 1".</p>`}
-          ${c.busy ? `<div class="flex justify-start"><div class="rounded-2xl bg-zinc-100 px-3.5 py-2 text-zinc-400">${iconSpinner()}</div></div>` : ''}
+        <div id="chat-scroll" class="flex-1 space-y-3 overflow-y-auto p-4">
+          ${bubbles || `<p class="mt-8 text-center text-xs text-ink-500">Ask about your applications, or say "score my resume against job 1".</p>`}
+          ${c.busy ? `<div class="flex justify-start"><div class="rounded-2xl border border-ink-700 bg-ink-800 px-4 py-2.5 text-ember-400">${iconSpinner()}</div></div>` : ''}
         </div>
-        <div class="flex items-center gap-2 border-t border-zinc-100 p-2.5">
-          <input class="flex-1 rounded-full border border-zinc-200 bg-zinc-50 px-3.5 py-2 text-sm focus:border-brand-400 focus:outline-none" placeholder="Message JAM…" value="${esc(c.draft)}" data-bind="chat-draft" ${c.busy ? 'disabled' : ''} />
-          <button class="flex h-9 w-9 items-center justify-center rounded-full bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50" data-action="send-chat" ${c.busy ? 'disabled' : ''}>➤</button>
+        <div class="flex items-center gap-2 border-t border-ink-700 p-3">
+          <input class="flex-1 rounded-full border border-ink-600 bg-ink-900 px-4 py-2.5 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ember-400 focus:outline-none" placeholder="Message JAM…" value="${esc(c.draft)}" data-bind="chat-draft" ${c.busy ? 'disabled' : ''} />
+          <button class="flex h-10 w-10 items-center justify-center rounded-full bg-ember-500 text-ink-950 hover:bg-ember-400 disabled:opacity-50" data-action="send-chat" ${c.busy ? 'disabled' : ''}>➤</button>
         </div>
       </div>`;
   }
@@ -839,7 +944,7 @@
       });
       return;
     }
-    if (action === 'dismiss-confirm') { if (e.target === el || el.dataset.action === 'dismiss-confirm') { state.confirmDialog = null; render(); } return; }
+    if (action === 'dismiss-confirm') { if (e.target === el) { state.confirmDialog = null; render(); } return; }
     if (action === 'run-confirm') {
       const cb = state.confirmDialog && state.confirmDialog.onConfirm;
       state.confirmDialog = null; render();
@@ -858,11 +963,7 @@
     }
     if (action === 'save-new-job') { saveNewJob(); return; }
     if (action === 'run-generation') { runGeneration(el.dataset.kind); return; }
-    if (action === 'open-submit-form') {
-      state.prepare.submitForm = { submitted_at: todayInputValue(), submission_method: 'manual' };
-      render(); return;
-    }
-    if (action === 'close-submit-form') { state.prepare.submitForm = null; render(); return; }
+    if (action === 'go-step') { goToStep(Number(el.dataset.step)); return; }
     if (action === 'confirm-submit') { submitApplication(); return; }
   });
 
