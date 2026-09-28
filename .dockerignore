@@ -1,0 +1,41 @@
+# .gitignore only protects git commits -- it has no effect on `docker build`,
+# which copies everything in the build context via COPY unless told
+# otherwise here. Every one of these must stay out of the image itself:
+# secrets and personal data belong only in the runtime volume mounts /
+# env_file already declared in docker-compose.yml, never baked into a layer.
+
+# Environment (contains real API keys)
+.env
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Database
+jam.db
+
+# User data (private career data)
+templates/*.tex
+data/resumes/*
+!data/resumes/.gitkeep
+outputs/generated/*
+!outputs/generated/.gitkeep
+
+# Gmail OAuth (client secret + cached refresh token)
+data/gmail_credentials.json
+data/gmail_token.json
+
+# MLflow tracking
+mlruns/*
+!mlruns/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# Docker / VCS
+*.log
+.git/
+.github/
+.dockerignore
+Dockerfile
