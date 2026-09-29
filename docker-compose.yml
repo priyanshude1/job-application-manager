@@ -9,10 +9,34 @@ services:
       - ./data:/app/data
       - ./mlruns:/app/mlruns
     env_file: .env
+    environment:
+      # Overrides .env's http://localhost:5001 (correct for running uvicorn
+      # directly on the host) -- inside this container "localhost" means
+      # itself, not the sibling mlflow container, which is only reachable via
+      # Compose's internal service-name DNS on its own listen port (5000, not
+      # the 5001 host-side mapping below, which is irrelevant to
+      # container-to-container traffic).
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     ports: ["5001:5000"]
     volumes:
       - ./mlruns:/mlflow/mlruns
+    environment:
+      # Recent MLflow server versions refuse to start against a plain
+      # filesystem backend store (./mlruns) unless explicitly allowed --
+      # opting in rather than migrating to a database backend, consistent
+      # with this project's "keep it simple for personal use" approach
+      # elsewhere (e.g. SQLite over Postgres).
+      - MLFLOW_ALLOW_FILE_STORE=true
+      # MLflow's DNS-rebinding protection validates the literal Host header
+      # text of incoming requests against an allowlist that only covers
+      # localhost/private-IP patterns by default -- "mlflow" (the Compose
+      # service name the jam container actually connects through) isn't on
+      # it, so every real request gets a 403 "Invalid Host header" until
+      # it's explicitly allowlisted here. Scoped to just this one expected
+      # internal hostname, not a wildcard, since this stays local-only
+      # regardless.
+      - MLFLOW_SERVER_ALLOWED_HOSTS=mlflow:5000
     command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri /mlflow/mlruns
